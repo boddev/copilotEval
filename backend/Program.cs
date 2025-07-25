@@ -1,0 +1,582 @@
+using Microsoft.AspNetCore.Cors;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using CopilotEvalApi.Services;
+using CopilotEvalApi.Models;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddOpenApi();
+
+// Configure logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+
+// Add CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000", "http://localhost:3001", "http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// Add HTTP client for external API calls
+builder.Services.AddHttpClient<ICopilotService, CopilotService>();
+
+// Register Copilot service
+builder.Services.AddScoped<ICopilotService, CopilotService>();
+
+var app = builder.Build();
+
+// Trigger rebuild to see latest logs
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+logger.LogInformation("🚀 Copilot Evaluation API starting up...");
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+// Only use HTTPS redirection in production
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
+app.UseCors("AllowReactApp");
+
+// API Endpoints
+app.MapGet("/api/health", () => new { Status = "Healthy", Timestamp = DateTime.UtcNow });
+
+// Debug endpoint to test JSON serialization
+app.MapPost("/api/debug/json", (ChatRequest request, ILogger<Program> logger) =>
+{
+    logger.LogInformation("🔍 Debug JSON endpoint called");
+    
+    var chatRequest = new CopilotChatRequest(
+        Message: new CopilotConversationRequestMessage(request.Prompt ?? ""),
+        AdditionalContext: null,
+        LocationHint: new CopilotConversationLocation(
+            Latitude: null,
+            Longitude: null,
+            TimeZone: request.TimeZone ?? "UTC",
+            CountryOrRegion: null,
+            CountryOrRegionConfidence: null
+        ),
+        Participants: null
+    );
+    
+    var apiRequest = new CopilotChatApiRequest(chatRequest);
+    var jsonContent = JsonSerializer.Serialize(apiRequest, new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    });
+    
+    logger.LogInformation("📋 Generated JSON: {Json}", jsonContent);
+    
+    return Results.Ok(new { GeneratedJson = jsonContent });
+});
+
+// OAuth Authentication Endpoints
+app.MapGet("/api/auth/url", async (ICopilotService copilotService, string? redirectUri, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🔐 [Auth {RequestId}] Generating OAuth URL", requestId);
+    logger.LogInformation("🔗 [Auth {RequestId}] Redirect URI: {RedirectUri}", requestId, redirectUri ?? "DEFAULT");
+    
+    try
+    {
+        var baseUrl = redirectUri ?? "http://localhost:5173";
+        var state = Guid.NewGuid().ToString();
+        
+        logger.LogInformation("🎲 [Auth {RequestId}] Generated state: {State}", requestId, state);
+        
+        var authUrl = await copilotService.GetAuthUrlAsync(baseUrl, state);
+        
+        logger.LogInformation("✅ [Auth {RequestId}] OAuth URL generated successfully", requestId);
+        logger.LogInformation("🌐 [Auth {RequestId}] Auth URL: {AuthUrl}", requestId, authUrl.Substring(0, Math.Min(authUrl.Length, 100)) + "...");
+        
+        return Results.Ok(new AuthUrlResponse(authUrl, state));
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Auth {RequestId}] Error generating OAuth URL: {Error}", requestId, ex.Message);
+        return Results.BadRequest(new { Error = ex.Message });
+    }
+});
+
+app.MapPost("/api/auth/token", async (ICopilotService copilotService, TokenRequest request, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🎫 [Token {RequestId}] Exchanging code for token", requestId);
+    logger.LogInformation("🔑 [Token {RequestId}] Code: {Code}", requestId, request.Code?.Substring(0, Math.Min(request.Code?.Length ?? 0, 20)) + "...");
+    logger.LogInformation("🎲 [Token {RequestId}] State: {State}", requestId, request.State);
+    logger.LogInformation("🔗 [Token {RequestId}] Redirect URI: {RedirectUri}", requestId, request.RedirectUri ?? "DEFAULT");
+    
+    try
+    {
+        var redirectUri = request.RedirectUri ?? "http://localhost:5173";
+        
+        logger.LogInformation("🌐 [Token {RequestId}] Calling M365 token endpoint...", requestId);
+        var startTime = DateTime.UtcNow;
+        
+        var tokenResponse = await copilotService.ExchangeCodeForTokenAsync(request.Code ?? "", redirectUri);
+        
+        var duration = DateTime.UtcNow - startTime;
+        logger.LogInformation("⚡ [Token {RequestId}] Token exchange completed in {Duration}ms", requestId, duration.TotalMilliseconds);
+        logger.LogInformation("✅ [Token {RequestId}] Access token obtained - Type: {TokenType}, Expires in: {ExpiresIn}s", 
+            requestId, tokenResponse.TokenType, tokenResponse.ExpiresIn);
+        
+        return Results.Ok(tokenResponse);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Token {RequestId}] Error exchanging token: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Token {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
+        return Results.BadRequest(new { Error = ex.Message });
+    }
+});
+
+// Get Installed Copilot Agents/Plugins Endpoint
+app.MapGet("/api/copilot/agents", async (ICopilotService copilotService, string? accessToken, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🤖 [Agents {RequestId}] Starting request to get installed agents", requestId);
+    logger.LogInformation("🔑 [Agents {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(accessToken));
+    
+    try
+    {
+        if (string.IsNullOrEmpty(accessToken))
+        {
+            logger.LogWarning("❌ [Agents {RequestId}] Access token is missing", requestId);
+            return Results.BadRequest(new { Error = "Access token is required to retrieve installed agents" });
+        }
+
+        logger.LogInformation("🔍 [Agents {RequestId}] Querying Microsoft Graph for Teams apps...", requestId);
+        var startTime = DateTime.UtcNow;
+        
+        var agentsResponse = await copilotService.GetInstalledAgentsAsync(accessToken);
+        
+        var duration = DateTime.UtcNow - startTime;
+        logger.LogInformation("⚡ [Agents {RequestId}] Agents query completed in {Duration}ms", requestId, duration.TotalMilliseconds);
+        logger.LogInformation("📊 [Agents {RequestId}] Found {AgentCount} agents/apps", requestId, agentsResponse.Value?.Count ?? 0);
+        
+        return Results.Ok(agentsResponse);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Agents {RequestId}] Error retrieving agents: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Agents {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
+        return Results.BadRequest(new { Error = ex.Message });
+    }
+});
+
+// Enhanced Copilot Chat Endpoint
+app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, ChatRequest request, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🔥 [Request {RequestId}] Starting Copilot chat request", requestId);
+    logger.LogInformation("📝 [Request {RequestId}] Prompt: '{Prompt}'", requestId, request.Prompt?.Substring(0, Math.Min(request.Prompt.Length, 100)) + (request.Prompt?.Length > 100 ? "..." : ""));
+    logger.LogInformation("🔑 [Request {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(request.AccessToken));
+    logger.LogInformation("💬 [Request {RequestId}] Conversation ID: {ConversationId}", requestId, request.ConversationId ?? "NEW");
+    
+    try
+    {
+        if (string.IsNullOrEmpty(request.AccessToken))
+        {
+            logger.LogWarning("❌ [Request {RequestId}] Access token is missing", requestId);
+            return Results.BadRequest(new ChatResponse(
+                Response: "",
+                Success: false,
+                Error: "Access token is required for M365 Copilot API calls",
+                ConversationId: null,
+                Attributions: null
+            ));
+        }
+
+        logger.LogInformation("🔄 [Request {RequestId}] Processing conversation setup...", requestId);
+        
+        // Create conversation if not provided
+        string conversationId;
+        if (string.IsNullOrEmpty(request.ConversationId))
+        {
+            logger.LogInformation("➕ [Request {RequestId}] Creating new conversation...", requestId);
+            conversationId = await copilotService.CreateConversationAsync(request.AccessToken);
+            logger.LogInformation("✅ [Request {RequestId}] Created conversation: {ConversationId}", requestId, conversationId);
+        }
+        else
+        {
+            conversationId = request.ConversationId;
+            logger.LogInformation("🔄 [Request {RequestId}] Using existing conversation: {ConversationId}", requestId, conversationId);
+        }
+
+        // Prepare the chat request
+        logger.LogInformation("📤 [Request {RequestId}] Preparing chat request for M365 Copilot...", requestId);
+        
+        // Prepare participants list if an agent is selected
+        List<CopilotParticipant>? participants = null;
+        if (!string.IsNullOrEmpty(request.SelectedAgentId))
+        {
+            participants = new List<CopilotParticipant>
+            {
+                new CopilotParticipant(request.SelectedAgentId, "application")
+            };
+            logger.LogInformation("🤖 [Request {RequestId}] Targeting specific agent: {AgentId}", requestId, request.SelectedAgentId);
+        }
+        
+        var chatRequest = new CopilotChatRequest(
+            Message: new CopilotConversationRequestMessage(request.Prompt ?? ""),
+            AdditionalContext: null,
+            LocationHint: new CopilotConversationLocation(
+                Latitude: null,
+                Longitude: null,
+                TimeZone: request.TimeZone ?? "UTC",
+                CountryOrRegion: null,
+                CountryOrRegionConfidence: null
+            ),
+            Participants: participants
+        );
+
+        logger.LogInformation("🌐 [Request {RequestId}] Sending request to M365 Copilot API...", requestId);
+        var startTime = DateTime.UtcNow;
+        
+        // Send chat to M365 Copilot
+        var response = await copilotService.ChatAsync(request.AccessToken, conversationId, chatRequest);
+        
+        var duration = DateTime.UtcNow - startTime;
+        logger.LogInformation("⚡ [Request {RequestId}] M365 Copilot API responded in {Duration}ms", requestId, duration.TotalMilliseconds);
+
+        // Get the latest response message
+        var latestMessage = response.Messages.LastOrDefault();
+        var responseText = latestMessage?.Text ?? "No response received";
+        
+        logger.LogInformation("📨 [Request {RequestId}] Response received - Length: {Length} chars", requestId, responseText.Length);
+        logger.LogInformation("📄 [Request {RequestId}] Response preview: '{ResponsePreview}'", requestId, responseText.Substring(0, Math.Min(responseText.Length, 200)) + (responseText.Length > 200 ? "..." : ""));
+        
+        if (latestMessage?.Attributions?.Any() == true)
+        {
+            logger.LogInformation("🔗 [Request {RequestId}] Found {AttributionCount} attribution(s)", requestId, latestMessage.Attributions.Count());
+        }
+
+        var result = new ChatResponse(
+            Response: responseText,
+            Success: true,
+            Error: null,
+            ConversationId: conversationId,
+            Attributions: latestMessage?.Attributions
+        );
+
+        logger.LogInformation("✅ [Request {RequestId}] Chat request completed successfully", requestId);
+        return Results.Ok(result);
+    }
+    catch (HttpRequestException ex)
+    {
+        logger.LogError("🌐 [Request {RequestId}] M365 Copilot API Error: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Request {RequestId}] HTTP Exception Details: {Details}", requestId, ex.ToString());
+        
+        return Results.BadRequest(new ChatResponse(
+            Response: "",
+            Success: false,
+            Error: $"M365 Copilot API Error: {ex.Message}",
+            ConversationId: request.ConversationId,
+            Attributions: null
+        ));
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Request {RequestId}] Unexpected error: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Request {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
+        
+        return Results.Problem(new ChatResponse(
+            Response: "",
+            Success: false,
+            Error: $"Internal server error: {ex.Message}",
+            ConversationId: request.ConversationId,
+            Attributions: null
+        ).ToString());
+    }
+});
+
+app.MapPost("/api/similarity/score", async (ICopilotService copilotService, SimilarityRequest request, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("📊 [Similarity {RequestId}] Starting semantic similarity evaluation using Copilot", requestId);
+    logger.LogInformation("📝 [Similarity {RequestId}] Expected: '{Expected}' (Length: {ExpectedLength})", 
+        requestId, 
+        request.Expected?.Substring(0, Math.Min(request.Expected?.Length ?? 0, 100)) + (request.Expected?.Length > 100 ? "..." : ""),
+        request.Expected?.Length ?? 0);
+    logger.LogInformation("🤖 [Similarity {RequestId}] Actual: '{Actual}' (Length: {ActualLength})", 
+        requestId, 
+        request.Actual?.Substring(0, Math.Min(request.Actual?.Length ?? 0, 100)) + (request.Actual?.Length > 100 ? "..." : ""),
+        request.Actual?.Length ?? 0);
+    logger.LogInformation("🔑 [Similarity {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(request.AccessToken));
+    
+    try
+    {
+        if (string.IsNullOrEmpty(request.AccessToken))
+        {
+            logger.LogWarning("❌ [Similarity {RequestId}] Access token is missing", requestId);
+            return Results.BadRequest(new SimilarityResponse(
+                Score: 0.0,
+                Success: false,
+                Error: "Access token is required for semantic evaluation using Copilot API"
+            ));
+        }
+
+        logger.LogInformation("🧠 [Similarity {RequestId}] Creating evaluation conversation with Copilot...", requestId);
+        var startTime = DateTime.UtcNow;
+        
+        // Create a new conversation for evaluation
+        var conversationId = await copilotService.CreateConversationAsync(request.AccessToken);
+        logger.LogInformation("✅ [Similarity {RequestId}] Created evaluation conversation: {ConversationId}", requestId, conversationId);
+
+        // Construct the evaluation prompt
+        var evaluationPrompt = $@"You are an expert evaluator. Please compare these two responses and determine if they provide semantically equivalent answers.
+
+Expected Response: ""{request.Expected ?? ""}""
+Actual Response: ""{request.Actual ?? ""}""
+
+Please analyze the semantic similarity and respond with EXACTLY this format (no additional text before or after):
+
+Score: [number between 0.0 and 1.0]
+Reasoning: [brief explanation of your evaluation]
+Differences: [key differences, or 'None' if semantically equivalent]
+
+Examples of correct format:
+Score: 0.9
+Reasoning: Both responses explain the same cooking process with minor wording differences
+Differences: Expected uses 'medium heat' while actual uses 'moderate temperature'
+
+Score: 0.3
+Reasoning: Responses address different aspects of the question
+Differences: Expected focuses on preparation steps, actual focuses on nutritional benefits
+
+Scoring guide:
+- 1.0 = Semantically identical (same meaning, even if different wording)
+- 0.8-0.9 = Very similar meaning with minor differences
+- 0.5-0.7 = Partially similar but notable differences in meaning
+- 0.2-0.4 = Different meanings but some related concepts
+- 0.0-0.1 = Completely different meanings
+
+Focus on semantic meaning rather than exact word matching. Start your response with 'Score:'";
+
+        // Create the chat request for evaluation
+        var chatRequest = new CopilotChatRequest(
+            Message: new CopilotConversationRequestMessage(evaluationPrompt),
+            AdditionalContext: null,
+            LocationHint: new CopilotConversationLocation(
+                Latitude: null,
+                Longitude: null,
+                TimeZone: "UTC",
+                CountryOrRegion: null,
+                CountryOrRegionConfidence: null
+            ),
+            Participants: null
+        );
+
+        logger.LogInformation("🌐 [Similarity {RequestId}] Sending evaluation request to Copilot...", requestId);
+        
+        // Send evaluation request to Copilot
+        var response = await copilotService.ChatAsync(request.AccessToken, conversationId, chatRequest);
+        
+        var duration = DateTime.UtcNow - startTime;
+        logger.LogInformation("⚡ [Similarity {RequestId}] Copilot evaluation completed in {Duration}ms", requestId, duration.TotalMilliseconds);
+
+        // Get the evaluation response
+        var latestMessage = response.Messages.LastOrDefault();
+        var evaluationText = latestMessage?.Text ?? "No evaluation received";
+        
+        logger.LogInformation("📨 [Similarity {RequestId}] Evaluation response received - Length: {Length} chars", requestId, evaluationText.Length);
+        logger.LogInformation("📋 [Similarity {RequestId}] Full evaluation: {Evaluation}", requestId, evaluationText);
+
+        // Parse the evaluation response
+        var (score, reasoning, differences) = ParseEvaluationResponse(evaluationText, logger, requestId);
+        
+        logger.LogInformation("📈 [Similarity {RequestId}] ✨ FINAL SIMILARITY SCORE: {Score:F4} ✨", requestId, score);
+        logger.LogInformation("💭 [Similarity {RequestId}] Reasoning: {Reasoning}", requestId, reasoning);
+        logger.LogInformation("🔍 [Similarity {RequestId}] Differences: {Differences}", requestId, differences);
+        
+        var result = new SimilarityResponse(
+            Score: score,
+            Success: true,
+            Error: null,
+            Reasoning: reasoning,
+            Differences: differences
+        );
+        
+        logger.LogInformation("✅ [Similarity {RequestId}] Semantic evaluation completed successfully with score: {Score:F4}", requestId, score);
+        return Results.Ok(result);
+    }
+    catch (HttpRequestException ex)
+    {
+        logger.LogError("🌐 [Similarity {RequestId}] Copilot API Error: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Similarity {RequestId}] HTTP Exception Details: {Details}", requestId, ex.ToString());
+        
+        return Results.BadRequest(new SimilarityResponse(
+            Score: 0.0,
+            Success: false,
+            Error: $"Copilot API Error: {ex.Message}"
+        ));
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Similarity {RequestId}] Error during semantic evaluation: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [Similarity {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
+        logger.LogError("🔍 [Similarity {RequestId}] Request Details - Expected: '{Expected}', Actual: '{Actual}', HasToken: {HasToken}", 
+            requestId, 
+            request.Expected?.Substring(0, Math.Min(request.Expected?.Length ?? 0, 50)) ?? "NULL",
+            request.Actual?.Substring(0, Math.Min(request.Actual?.Length ?? 0, 50)) ?? "NULL",
+            !string.IsNullOrEmpty(request.AccessToken));
+        
+        return Results.BadRequest(new SimilarityResponse(
+            Score: 0.0,
+            Success: false,
+            Error: ex.Message
+        ));
+    }
+});
+
+app.Run();
+
+logger.LogInformation("🛑 Copilot Evaluation API shutting down...");
+
+// Helper method to parse Copilot's evaluation response
+static (double score, string reasoning, string differences) ParseEvaluationResponse(string evaluationText, ILogger logger, string requestId)
+{
+    try
+    {
+        logger.LogInformation("🔍 [Similarity {RequestId}] Parsing evaluation response...", requestId);
+        
+        var lines = evaluationText.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        double score = 0.0;
+        string reasoning = "Unable to parse reasoning";
+        string differences = "Unable to parse differences";
+
+        foreach (var line in lines)
+        {
+            var trimmedLine = line.Trim();
+            
+            // More flexible parsing for score
+            if (trimmedLine.StartsWith("Score:", StringComparison.OrdinalIgnoreCase) ||
+                trimmedLine.StartsWith("Similarity:", StringComparison.OrdinalIgnoreCase) ||
+                trimmedLine.StartsWith("Rating:", StringComparison.OrdinalIgnoreCase))
+            {
+                var colonIndex = trimmedLine.IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    var scoreText = trimmedLine.Substring(colonIndex + 1).Trim();
+                    
+                    // Try to extract number from various formats like "0.8", "8/10", "80%", etc.
+                    var regex = new System.Text.RegularExpressions.Regex(@"(\d+\.?\d*)");
+                    var match = regex.Match(scoreText);
+                    
+                    if (match.Success && double.TryParse(match.Value, out var parsedScore))
+                    {
+                        // Handle different scales (0-1, 0-10, 0-100)
+                        if (parsedScore > 1.0 && parsedScore <= 10.0)
+                            score = parsedScore / 10.0; // Convert 0-10 scale to 0-1
+                        else if (parsedScore > 10.0)
+                            score = parsedScore / 100.0; // Convert 0-100 scale to 0-1
+                        else
+                            score = parsedScore; // Already 0-1 scale
+                            
+                        score = Math.Max(0.0, Math.Min(1.0, score)); // Clamp between 0 and 1
+                        logger.LogInformation("✅ [Similarity {RequestId}] Parsed score: {Score} from text: '{ScoreText}'", requestId, score, scoreText);
+                    }
+                    else
+                    {
+                        logger.LogWarning("⚠️ [Similarity {RequestId}] Could not parse score from: '{ScoreText}'", requestId, scoreText);
+                    }
+                }
+            }
+            else if (trimmedLine.StartsWith("Reasoning:", StringComparison.OrdinalIgnoreCase) ||
+                     trimmedLine.StartsWith("Explanation:", StringComparison.OrdinalIgnoreCase) ||
+                     trimmedLine.StartsWith("Analysis:", StringComparison.OrdinalIgnoreCase))
+            {
+                var colonIndex = trimmedLine.IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    reasoning = trimmedLine.Substring(colonIndex + 1).Trim();
+                    logger.LogInformation("✅ [Similarity {RequestId}] Parsed reasoning: '{Reasoning}'", requestId, reasoning.Substring(0, Math.Min(reasoning.Length, 100)) + (reasoning.Length > 100 ? "..." : ""));
+                }
+            }
+            else if (trimmedLine.StartsWith("Differences:", StringComparison.OrdinalIgnoreCase) ||
+                     trimmedLine.StartsWith("Key differences:", StringComparison.OrdinalIgnoreCase))
+            {
+                var colonIndex = trimmedLine.IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    differences = trimmedLine.Substring(colonIndex + 1).Trim();
+                    logger.LogInformation("✅ [Similarity {RequestId}] Parsed differences: '{Differences}'", requestId, differences.Substring(0, Math.Min(differences.Length, 100)) + (differences.Length > 100 ? "..." : ""));
+                }
+            }
+        }
+
+        // If we couldn't parse the score from structured format, try more aggressive parsing
+        if (score == 0.0)
+        {
+            logger.LogWarning("⚠️ [Similarity {RequestId}] Could not find structured score, attempting aggressive parsing", requestId);
+            
+            // Look for patterns like "0.8", "8/10", "80%", "8 out of 10", etc.
+            var patterns = new[]
+            {
+                @"(\d+\.?\d*)/10",           // "8/10" or "8.5/10"
+                @"(\d+\.?\d*)%",             // "80%" or "85.5%"
+                @"(\d+\.?\d*)\s*out\s*of\s*10", // "8 out of 10"
+                @"(\d+\.?\d*)\s*\/\s*1\.?0?", // "0.8/1" or "8/10"
+                @"(\d+\.?\d*)"               // Any decimal number as fallback
+            };
+            
+            foreach (var pattern in patterns)
+            {
+                var regex = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var match = regex.Match(evaluationText);
+                
+                if (match.Success && double.TryParse(match.Groups[1].Value, out var fallbackScore))
+                {
+                    // Apply appropriate scaling based on the pattern matched
+                    if (pattern.Contains("/10") || pattern.Contains("out of 10"))
+                        score = fallbackScore / 10.0;
+                    else if (pattern.Contains("%"))
+                        score = fallbackScore / 100.0;
+                    else if (fallbackScore > 1.0 && fallbackScore <= 10.0)
+                        score = fallbackScore / 10.0;
+                    else if (fallbackScore > 10.0)
+                        score = fallbackScore / 100.0;
+                    else
+                        score = fallbackScore;
+                        
+                    score = Math.Max(0.0, Math.Min(1.0, score));
+                    logger.LogInformation("🔄 [Similarity {RequestId}] Fallback score extracted: {Score} using pattern: {Pattern}", requestId, score, pattern);
+                    break;
+                }
+            }
+            
+            // If still no score, use the full response as reasoning and set a neutral score
+            if (score == 0.0)
+            {
+                score = 0.5;
+                reasoning = $"Could not parse numerical score. Full response: {evaluationText.Substring(0, Math.Min(evaluationText.Length, 300))}...";
+                logger.LogWarning("⚠️ [Similarity {RequestId}] All parsing failed, using default score of 0.5", requestId);
+            }
+        }
+
+        return (score, reasoning, differences);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [Similarity {RequestId}] Error parsing evaluation response: {Error}", requestId, ex.Message);
+        return (0.5, $"Error parsing response: {ex.Message}", "Unable to determine differences due to parsing error");
+    }
+}
+
+// Request/Response models for similarity
+public record SimilarityRequest(string Expected, string Actual, string AccessToken);
+public record SimilarityResponse(double Score, bool Success, string? Error = null, string? Reasoning = null, string? Differences = null);

@@ -1,0 +1,6 @@
+Prompt,Expected Output,Actual Output,Score
+"What is the capital of France?","Paris","",""
+"Explain photosynthesis in simple terms","Photosynthesis is the process by which plants use sunlight, water, and carbon dioxide to create oxygen and energy in the form of sugar.","",""
+"Write a short poem about winter","A short poem describing winter scenes, cold weather, and seasonal imagery","",""
+"What are the benefits of exercise?","Exercise improves physical health, mental well-being, cardiovascular fitness, and helps maintain a healthy weight.","",""
+"How do you make scrambled eggs?","Beat eggs, heat butter in pan, add eggs, stir gently while cooking until fluffy and cooked through.","",""

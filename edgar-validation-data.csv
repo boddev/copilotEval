@@ -1,0 +1,18 @@
+"How do the 2024 financial results of Salesforce compare to Microsoft based on their 10-K reports?", "In the quarter ending December 31, 2024, Microsoft reported strong financial performance with approximately $62 billion in revenue, reflecting a 16% year-over-year increase, driven primarily by growth in its Intelligent Cloud segment, including Azure, and continued momentum in Office 365 and LinkedIn. Operating income reached around $27 billion, with a robust margin of approximately 43%, supported by disciplined cost management and a favorable product mix. In contrast, Salesforce, for the quarter ending July 31, 2024, posted revenue of $8.6 billion, up 11% year-over-year, with its Subscription and Support segment contributing the majority. Salesforce’s operating income stood at $1.5 billion, yielding a margin of about 17%, reflecting ongoing investments in AI-driven CRM tools and integration of Slack and Data Cloud. While Microsoft continued its shareholder return initiatives through dividends and share repurchases, Salesforce resumed buybacks but does not pay a dividend. Strategically, Microsoft emphasized AI infrastructure expansion and global cloud investments, whereas Salesforce focused on enhancing its AI CRM capabilities and optimizing costs post-restructuring. Both companies acknowledged macroeconomic uncertainties and regulatory scrutiny as key risks moving forward."
+"How many outstanding shares did each company have during their last 10-Q filing","According to the latest quarterly report filed for the period ending March 31, 2025, Microsoft reported approximately 7.43 billion shares outstanding. Salesforce had outstanding Shares: 973,383,459 shares"
+"Over the last 6 quarters what were the earnings per share for Meta, Alphabet, Microsoft and Intel. " , "Quarter (Most Recent First)	Meta	Alphabet	Microsoft	Intel
+Q2 2025	3.17	1.50	2.89	0.40
+Q1 2025	2.95	1.39	2.65	0.34
+Q4 2024	2.92	1.30	2.41	0.29
+Q3 2024	2.59	1.20	2.27	0.24
+Q2 2024	2.40	1.09	2.12	0.19
+Q1 2024	2.18	0.98	1.97	0.14"
+"what was the earnings per share for Nvidia over the same time period", "Fiscal Quarter	Period End	EPS (Diluted)
+Q2 FY2025	July 30, 2023	$2.70
+Q1 FY2025	April 30, 2023	$2.46
+Q4 FY2024	January 28, 2024	$2.12
+Q3 FY2024	October 29, 2023	$1.97
+Q2 FY2024	July 30, 2023	$1.36
+Q1 FY2024	April 30, 2023	$0.92"
+
+"What is your analysis for highest potential earning with the new dataset", "Based on the EPS data over the last 6 quarters, Nvidia shows the highest earnings growth potential, with a remarkable 193.5% increase in diluted EPS—from $0.92 in Q1 2024 to $2.70 in Q2 2025."
