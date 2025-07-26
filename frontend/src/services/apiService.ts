@@ -23,6 +23,7 @@ export interface SimilarityRequest {
   expected: string;
   actual: string;
   accessToken: string;
+  additionalInstructions?: string;
 }
 
 export interface SimilarityResponse {
@@ -54,11 +55,12 @@ export const apiService = {
   },
 
   // Get similarity score between expected and actual output
-  async getSimilarityScore(expected: string, actual: string, accessToken: string): Promise<SimilarityResponse> {
+  async getSimilarityScore(expected: string, actual: string, accessToken: string, additionalInstructions?: string): Promise<SimilarityResponse> {
     const response = await apiClient.post<SimilarityResponse>('/similarity/score', {
       expected,
       actual,
       accessToken,
+      additionalInstructions,
     });
 
     if (!response.data.success) {

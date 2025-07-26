@@ -4,7 +4,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import ValidationTable from './components/ValidationTable';
 import { ValidationEntry } from './types/ValidationEntry';
-import { authService, CopilotChatRequest, TeamsApp } from './services/authService';
+import { authService, CopilotChatRequest, ExternalConnection } from './services/authService';
 import './App.css';
 
 interface CsvRow {
@@ -21,8 +21,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [agents, setAgents] = useState<TeamsApp[]>([]);
-  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+  const [knowledgeSources, setKnowledgeSources] = useState<ExternalConnection[]>([]);
+  const [isLoadingKnowledgeSources, setIsLoadingKnowledgeSources] = useState(false);
 
   useEffect(() => {
     // Check authentication status on app load
@@ -183,7 +183,9 @@ function App() {
         const chatRequest: Omit<CopilotChatRequest, 'accessToken'> = {
           prompt: entry.prompt,
           conversationId: undefined,
-          selectedAgentId: entry.selectedAgentId
+          selectedAgentId: entry.selectedAgentId,
+          additionalInstructions: entry.additionalInstructions,
+          selectedKnowledgeSource: entry.selectedKnowledgeSource
         };
 
         console.log('📤 Sending chat request:', chatRequest);
@@ -202,7 +204,9 @@ function App() {
               console.log('📊 Calculating similarity score...');
               const similarityResponse = await authService.calculateSimilarity({
                 expected: entry.expectedOutput,
-                actual: chatResponse.response
+                actual: chatResponse.response,
+                additionalInstructions: entry.additionalInstructions,
+                selectedKnowledgeSource: entry.selectedKnowledgeSource
               });
               
               if (similarityResponse.success) {
@@ -246,19 +250,33 @@ function App() {
     console.log('🏁 Validation process completed');
   };
 
-  const loadAgents = async () => {
-    console.log('🤖 Loading installed Copilot agents...');
-    setIsLoadingAgents(true);
+  const loadKnowledgeSources = async () => {
+    console.log('🗃️ Loading external knowledge sources...');
+    setIsLoadingKnowledgeSources(true);
     
     try {
-      const agentsResponse = await authService.getInstalledAgents();
-      setAgents(agentsResponse.value || []);
-      console.log('✅ Loaded', agentsResponse.value?.length || 0, 'agents');
+      const sourcesResponse = await authService.getKnowledgeSources();
+      setKnowledgeSources(sourcesResponse.value || []);
+      console.log('✅ Loaded', sourcesResponse.value?.length || 0, 'knowledge sources');
     } catch (error) {
-      console.error('❌ Failed to load agents:', error);
-      alert('Failed to load agents: ' + (error as Error).message);
+      console.error('❌ Failed to load knowledge sources:', error);
+      
+      let errorMessage = 'Failed to load knowledge sources';
+      
+      // Check for permission errors
+      if ((error as any)?.response?.status === 403) {
+        errorMessage = 'Permission denied: Your application needs Microsoft Graph permissions to access external connections. ' +
+                     'Required permissions: ExternalConnection.Read.All or ExternalConnection.ReadWrite.All. ' +
+                     'Please contact your administrator to grant these permissions and provide admin consent.';
+      } else if ((error as any)?.response?.data?.detail) {
+        errorMessage = (error as any).response.data.detail;
+      } else {
+        errorMessage = 'Failed to load knowledge sources: ' + (error as Error).message;
+      }
+      
+      alert(errorMessage);
     } finally {
-      setIsLoadingAgents(false);
+      setIsLoadingKnowledgeSources(false);
     }
   };
 
@@ -402,18 +420,18 @@ function App() {
                   {isAuthenticated && (
                     <button 
                       className="btn btn-outline-info"
-                      onClick={loadAgents}
-                      disabled={isLoadingAgents}
+                      onClick={loadKnowledgeSources}
+                      disabled={isLoadingKnowledgeSources}
                     >
-                      {isLoadingAgents ? (
+                      {isLoadingKnowledgeSources ? (
                         <>
                           <span className="spinner-border spinner-border-sm me-2"></span>
                           Loading...
                         </>
                       ) : (
                         <>
-                          <i className="bi bi-robot me-1"></i>
-                          Load Agents ({agents.length})
+                          <i className="bi bi-database me-1"></i>
+                          Load Knowledge Sources ({knowledgeSources.length})
                         </>
                       )}
                     </button>
@@ -445,41 +463,41 @@ function App() {
               </div>
             </div>
 
-            {/* Agents Section */}
-            {agents.length > 0 && (
+            {/* Knowledge Sources Section */}
+            {knowledgeSources.length > 0 && (
               <div className="card shadow-sm mt-3">
                 <div className="card-header bg-white">
                   <h6 className="card-title mb-0">
-                    <i className="bi bi-robot me-2"></i>
-                    Installed Copilot Agents ({agents.length})
+                    <i className="bi bi-database me-2"></i>
+                    Available Knowledge Sources ({knowledgeSources.length})
                   </h6>
                 </div>
                 <div className="card-body">
                   <div className="row g-2">
-                    {agents.slice(0, 6).map((agent) => (
-                      <div key={agent.id} className="col-12">
+                    {knowledgeSources.slice(0, 6).map((source) => (
+                      <div key={source.id} className="col-12">
                         <div className="d-flex align-items-start p-2 border rounded">
                           <div className="flex-grow-1">
-                            <div className="fw-semibold small">{agent.displayName}</div>
-                            {agent.shortDescription && (
-                              <div className="text-muted small">{agent.shortDescription.substring(0, 60)}...</div>
+                            <div className="fw-semibold small">{source.name}</div>
+                            {source.description && (
+                              <div className="text-muted small">{source.description.substring(0, 80)}...</div>
                             )}
                             <div className="d-flex gap-2 mt-1">
-                              {agent.distributionMethod && (
-                                <span className="badge bg-secondary">{agent.distributionMethod}</span>
+                              {source.state && (
+                                <span className="badge bg-secondary">{source.state}</span>
                               )}
-                              {agent.version && (
-                                <span className="badge bg-info">{agent.version}</span>
-                              )}
+                              <span className="badge bg-info text-truncate" style={{ maxWidth: '150px' }}>
+                                ID: {source.id}
+                              </span>
                             </div>
                           </div>
                         </div>
                       </div>
                     ))}
-                    {agents.length > 6 && (
+                    {knowledgeSources.length > 6 && (
                       <div className="col-12">
                         <div className="text-center text-muted small">
-                          ... and {agents.length - 6} more agents
+                          ... and {knowledgeSources.length - 6} more knowledge sources
                         </div>
                       </div>
                     )}
@@ -506,7 +524,7 @@ function App() {
                     onRemoveEntry={removeEntry}
                     onUpdateEntry={updateEntry}
                     isAuthenticated={isAuthenticated}
-                    agents={agents}
+                    knowledgeSources={knowledgeSources}
                   />
                 ) : (
                   <div className="text-center py-5">

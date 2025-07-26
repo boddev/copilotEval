@@ -1,6 +1,6 @@
 import React from 'react';
 import { ValidationEntry } from '../types/ValidationEntry';
-import { TeamsApp } from '../services/authService';
+import { ExternalConnection } from '../services/authService';
 
 interface ValidationTableProps {
   entries: ValidationEntry[];
@@ -8,7 +8,7 @@ interface ValidationTableProps {
   onRemoveEntry: (id: number) => void;
   onUpdateEntry: (id: number, updates: Partial<ValidationEntry>) => void;
   isAuthenticated: boolean;
-  agents: TeamsApp[];
+  knowledgeSources: ExternalConnection[];
 }
 
 const ValidationTable: React.FC<ValidationTableProps> = ({
@@ -16,7 +16,7 @@ const ValidationTable: React.FC<ValidationTableProps> = ({
   onAddEntry,
   onRemoveEntry,
   onUpdateEntry,
-  agents
+  knowledgeSources
 }) => {
   const handlePromptChange = (id: number, prompt: string) => {
     onUpdateEntry(id, { prompt });
@@ -26,8 +26,12 @@ const ValidationTable: React.FC<ValidationTableProps> = ({
     onUpdateEntry(id, { expectedOutput });
   };
 
-  const handleAgentChange = (id: number, selectedAgentId: string) => {
-    onUpdateEntry(id, { selectedAgentId: selectedAgentId || undefined });
+  const handleKnowledgeSourceChange = (id: number, selectedKnowledgeSource: string) => {
+    onUpdateEntry(id, { selectedKnowledgeSource: selectedKnowledgeSource || undefined });
+  };
+
+  const handleAdditionalInstructionsChange = (id: number, additionalInstructions: string) => {
+    onUpdateEntry(id, { additionalInstructions: additionalInstructions || undefined });
   };
 
   const getStatusBadge = (status: ValidationEntry['status']) => {
@@ -56,27 +60,31 @@ const ValidationTable: React.FC<ValidationTableProps> = ({
             <thead className="table-dark">
               <tr>
                 <th style={{ width: '3%', minWidth: '40px' }} className="text-center">#</th>
-                <th style={{ width: '15%', minWidth: '180px' }}>
+                <th style={{ width: '13%', minWidth: '150px' }}>
                   <i className="bi bi-chat-quote me-1"></i>
                   Prompt
                 </th>
-                <th style={{ width: '12%', minWidth: '140px' }}>
-                  <i className="bi bi-robot me-1"></i>
-                  Agent
+                <th style={{ width: '10%', minWidth: '120px' }}>
+                  <i className="bi bi-database me-1"></i>
+                  Knowledge Source
                 </th>
-                <th style={{ width: '15%', minWidth: '180px' }}>
+                <th style={{ width: '13%', minWidth: '150px' }}>
+                  <i className="bi bi-gear me-1"></i>
+                  Additional Instructions
+                </th>
+                <th style={{ width: '13%', minWidth: '150px' }}>
                   <i className="bi bi-check-circle me-1"></i>
                   Expected Output
                 </th>
-                <th style={{ width: '15%', minWidth: '180px' }}>
+                <th style={{ width: '13%', minWidth: '150px' }}>
                   <i className="bi bi-cpu me-1"></i>
                   Actual Output
                 </th>
-                <th style={{ width: '17%', minWidth: '180px' }}>
+                <th style={{ width: '15%', minWidth: '160px' }}>
                   <i className="bi bi-lightbulb me-1"></i>
                   Reasoning
                 </th>
-                <th style={{ width: '8%', minWidth: '80px' }} className="text-center">
+                <th style={{ width: '7%', minWidth: '70px' }} className="text-center">
                   <i className="bi bi-graph-up me-1"></i>
                   Score
                 </th>
@@ -102,16 +110,30 @@ const ValidationTable: React.FC<ValidationTableProps> = ({
                   <td>
                     <select
                       className="form-select"
-                      value={entry.selectedAgentId || ''}
-                      onChange={(e) => handleAgentChange(entry.id, e.target.value)}
+                      value={entry.selectedKnowledgeSource || ''}
+                      onChange={(e) => handleKnowledgeSourceChange(entry.id, e.target.value)}
                     >
-                      <option value="">General Copilot</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.displayName}
+                      <option value="">No specific source</option>
+                      {knowledgeSources.map((source) => (
+                        <option key={source.id} value={source.id}>
+                          {source.name}
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    <textarea
+                      className="form-control"
+                      rows={4}
+                      value={entry.additionalInstructions || ''}
+                      onChange={(e) => handleAdditionalInstructionsChange(entry.id, e.target.value)}
+                      placeholder="Enter additional instructions or context for this prompt..."
+                      style={{ minHeight: '120px', resize: 'vertical' }}
+                    />
+                    <small className="text-muted mt-1 d-block">
+                      <i className="bi bi-info-circle me-1"></i>
+                      Optional: Add specific instructions that will be sent as additional context with each prompt
+                    </small>
                   </td>
                   <td>
                     <textarea
@@ -226,21 +248,40 @@ const ValidationTable: React.FC<ValidationTableProps> = ({
               
               <div className="mb-3">
                 <label className="form-label fw-bold">
-                  <i className="bi bi-robot me-1"></i>
-                  Agent
+                  <i className="bi bi-database me-1"></i>
+                  Knowledge Source
                 </label>
                 <select
                   className="form-select"
-                  value={entry.selectedAgentId || ''}
-                  onChange={(e) => handleAgentChange(entry.id, e.target.value)}
+                  value={entry.selectedKnowledgeSource || ''}
+                  onChange={(e) => handleKnowledgeSourceChange(entry.id, e.target.value)}
                 >
-                  <option value="">General Copilot</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.displayName}
+                  <option value="">No specific source</option>
+                  {knowledgeSources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
                     </option>
                   ))}
                 </select>
+              </div>
+              
+              <div className="mb-3">
+                <label className="form-label fw-bold">
+                  <i className="bi bi-gear me-1"></i>
+                  Additional Instructions
+                </label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={entry.additionalInstructions || ''}
+                  onChange={(e) => handleAdditionalInstructionsChange(entry.id, e.target.value)}
+                  placeholder="Enter additional instructions or context for this prompt..."
+                  style={{ minHeight: '100px', resize: 'vertical' }}
+                />
+                <small className="text-muted mt-1">
+                  <i className="bi bi-info-circle me-1"></i>
+                  Optional: Add specific instructions that will be sent as additional context with each prompt
+                </small>
               </div>
               
               <div className="mb-3">
