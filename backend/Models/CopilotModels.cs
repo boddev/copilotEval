@@ -19,13 +19,7 @@ public record CopilotConversationCreateResponse(
 public record CopilotChatRequest(
     [property: JsonPropertyName("message")] CopilotConversationRequestMessage Message,
     [property: JsonPropertyName("additionalContext")] List<CopilotContextMessage>? AdditionalContext,
-    [property: JsonPropertyName("locationHint")] CopilotConversationLocation LocationHint,
-    [property: JsonPropertyName("participants")] List<CopilotParticipant>? Participants
-);
-
-public record CopilotParticipant(
-    [property: JsonPropertyName("id")] string Id,
-    [property: JsonPropertyName("type")] string Type
+    [property: JsonPropertyName("locationHint")] CopilotConversationLocation LocationHint
 );
 
 public record CopilotConversationRequestMessage(
@@ -108,7 +102,10 @@ public record ChatRequest(
     string? ConversationId,
     string? AccessToken,
     string? TimeZone,
-    string? SelectedAgentId
+    string? SelectedAgentId,
+    string? AdditionalInstructions,
+    string? KnowledgeSourceGuidance,
+    string? SelectedKnowledgeSource
 );
 
 public record ChatResponse(
@@ -186,4 +183,78 @@ public record BasicUserInfo(
 
 public record BotInfo(
     [property: JsonPropertyName("id")] string? Id
+);
+
+// Microsoft Graph Search Models for External Connections
+public record ExternalConnectionsResponse(
+    [property: JsonPropertyName("value")] List<ExternalConnection> Value
+);
+
+public record ExternalConnection(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("description")] string? Description,
+    [property: JsonPropertyName("state")] string? State,
+    [property: JsonPropertyName("configuration")] ExternalConnectionConfiguration? Configuration
+);
+
+public record ExternalConnectionConfiguration(
+    [property: JsonPropertyName("authorizedAppIds")] List<string>? AuthorizedAppIds
+);
+
+// Microsoft Graph Search Request/Response Models
+public record GraphSearchRequest(
+    [property: JsonPropertyName("requests")] List<SearchRequestItem> Requests
+);
+
+public record SearchRequestItem(
+    [property: JsonPropertyName("entityTypes")] List<string> EntityTypes,
+    [property: JsonPropertyName("contentSources")] List<string>? ContentSources,
+    [property: JsonPropertyName("query")] SearchQuery Query,
+    [property: JsonPropertyName("from")] int From,
+    [property: JsonPropertyName("size")] int Size,
+    [property: JsonPropertyName("fields")] List<string>? Fields
+);
+
+public record SearchQuery(
+    [property: JsonPropertyName("queryString")] string QueryString
+);
+
+public record GraphSearchResponse(
+    [property: JsonPropertyName("value")] List<SearchResponseContainer> Value
+);
+
+public record SearchResponseContainer(
+    [property: JsonPropertyName("searchTerms")] List<string>? SearchTerms,
+    [property: JsonPropertyName("hitsContainers")] List<SearchHitsContainer> HitsContainers
+);
+
+public record SearchHitsContainer(
+    [property: JsonPropertyName("hits")] List<SearchHit> Hits,
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("moreResultsAvailable")] bool MoreResultsAvailable
+);
+
+public record SearchHit(
+    [property: JsonPropertyName("hitId")] string HitId,
+    [property: JsonPropertyName("rank")] int Rank,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("resource")] object? Resource
+);
+
+// Enhanced models with knowledge source support
+public record SimilarityRequest(
+    string Expected,
+    string Actual,
+    string? AccessToken,
+    string? AdditionalInstructions,
+    string? SelectedKnowledgeSource
+);
+
+public record SimilarityResponse(
+    double Score, 
+    bool Success, 
+    string? Error = null, 
+    string? Reasoning = null, 
+    string? Differences = null
 );

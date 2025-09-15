@@ -20,6 +20,8 @@ export interface CopilotChatRequest {
   accessToken: string;
   timeZone?: string;
   selectedAgentId?: string;
+  additionalInstructions?: string;
+  selectedKnowledgeSource?: string;
 }
 
 export interface CopilotChatResponse {
@@ -45,6 +47,8 @@ export interface SimilarityRequest {
   expected: string;
   actual: string;
   accessToken: string;
+  additionalInstructions?: string;
+  selectedKnowledgeSource?: string;
 }
 
 export interface SimilarityResponse {
@@ -53,6 +57,20 @@ export interface SimilarityResponse {
   error?: string;
   reasoning?: string;
   differences?: string;
+}
+
+export interface ExternalConnection {
+  id: string;
+  name: string;
+  description?: string;
+  state?: string;
+  configuration?: {
+    authorizedAppIds?: string[];
+  };
+}
+
+export interface ExternalConnectionsResponse {
+  value: ExternalConnection[];
 }
 
 export interface TeamsApp {
@@ -258,6 +276,42 @@ class AuthService {
       return response.data;
     } catch (error) {
       console.error('❌ Failed to get installed agents:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('❌ Response status:', error.response?.status);
+        console.error('❌ Response data:', error.response?.data);
+      }
+      throw error;
+    }
+  }
+
+  public async getKnowledgeSources(): Promise<ExternalConnectionsResponse> {
+    console.log('🗃️ Getting external knowledge sources...');
+    const accessToken = this.getAccessToken();
+    
+    if (!accessToken) {
+      console.error('❌ No access token available');
+      throw new Error('Not authenticated. Please log in first.');
+    }
+    
+    console.log('✅ Access token found for knowledge sources query');
+
+    try {
+      const response = await axios.get<ExternalConnectionsResponse>(`${API_BASE_URL}/copilot/knowledge-sources`, {
+        params: { accessToken }
+      });
+      
+      console.log('🗃️ Knowledge sources response:', {
+        connectionCount: response.data.value?.length || 0,
+        connections: response.data.value?.slice(0, 3).map(conn => ({
+          name: conn.name,
+          id: conn.id,
+          description: conn.description
+        }))
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to get knowledge sources:', error);
       if (axios.isAxiosError(error)) {
         console.error('❌ Response status:', error.response?.status);
         console.error('❌ Response data:', error.response?.data);

@@ -8,5 +8,6 @@ export interface ValidationEntry {
   differences?: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   errorMessage?: string;
-  selectedAgentId?: string;
+  additionalInstructions?: string;
+  selectedKnowledgeSource?: string;
 }

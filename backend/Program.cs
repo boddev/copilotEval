@@ -27,9 +27,11 @@ builder.Services.AddCors(options =>
 
 // Add HTTP client for external API calls
 builder.Services.AddHttpClient<ICopilotService, CopilotService>();
+builder.Services.AddHttpClient<GraphSearchService>();
 
-// Register Copilot service
+// Register services
 builder.Services.AddScoped<ICopilotService, CopilotService>();
+builder.Services.AddScoped<GraphSearchService>();
 
 var app = builder.Build();
 
@@ -59,17 +61,29 @@ app.MapPost("/api/debug/json", (ChatRequest request, ILogger<Program> logger) =>
 {
     logger.LogInformation("🔍 Debug JSON endpoint called");
     
+    // Prepare additional context if instructions are provided
+    List<CopilotContextMessage>? additionalContext = null;
+    if (!string.IsNullOrWhiteSpace(request.AdditionalInstructions))
+    {
+        additionalContext = new List<CopilotContextMessage>
+        {
+            new CopilotContextMessage(
+                Text: request.AdditionalInstructions,
+                Description: "Additional agent instructions or context"
+            )
+        };
+    }
+    
     var chatRequest = new CopilotChatRequest(
         Message: new CopilotConversationRequestMessage(request.Prompt ?? ""),
-        AdditionalContext: null,
+        AdditionalContext: additionalContext,
         LocationHint: new CopilotConversationLocation(
             Latitude: null,
             Longitude: null,
             TimeZone: request.TimeZone ?? "UTC",
             CountryOrRegion: null,
             CountryOrRegionConfidence: null
-        ),
-        Participants: null
+        )
     );
     
     var apiRequest = new CopilotChatApiRequest(chatRequest);
@@ -178,14 +192,58 @@ app.MapGet("/api/copilot/agents", async (ICopilotService copilotService, string?
     }
 });
 
+// Get External Knowledge Sources Endpoint
+app.MapGet("/api/copilot/knowledge-sources", async (GraphSearchService graphSearchService, string? accessToken, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🔍 [KnowledgeSources {RequestId}] Starting request to get external connections", requestId);
+    logger.LogInformation("🔑 [KnowledgeSources {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(accessToken));
+    
+    try
+    {
+        if (string.IsNullOrEmpty(accessToken))
+        {
+            logger.LogWarning("❌ [KnowledgeSources {RequestId}] Access token is missing", requestId);
+            return Results.BadRequest(new { Error = "Access token is required to retrieve knowledge sources" });
+        }
+
+        logger.LogInformation("🔍 [KnowledgeSources {RequestId}] Querying Microsoft Graph for external connections...", requestId);
+        var startTime = DateTime.UtcNow;
+        
+        var connections = await graphSearchService.GetExternalConnectionsAsync(accessToken);
+        
+        var duration = DateTime.UtcNow - startTime;
+        logger.LogInformation("⚡ [KnowledgeSources {RequestId}] Knowledge sources query completed in {Duration}ms", requestId, duration.TotalMilliseconds);
+        logger.LogInformation("📊 [KnowledgeSources {RequestId}] Found {ConnectionCount} external connections", requestId, connections.Count);
+        
+        return Results.Ok(new { value = connections });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        logger.LogWarning("🔐 [KnowledgeSources {RequestId}] Permission denied: {Error}", requestId, ex.Message);
+        return Results.Problem(
+            detail: ex.Message,
+            statusCode: 403,
+            title: "Permission Required"
+        );
+    }
+    catch (Exception ex)
+    {
+        logger.LogError("💥 [KnowledgeSources {RequestId}] Error retrieving knowledge sources: {Error}", requestId, ex.Message);
+        logger.LogError("🔍 [KnowledgeSources {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
+        return Results.BadRequest(new { Error = ex.Message });
+    }
+});
+
 // Enhanced Copilot Chat Endpoint
-app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, ChatRequest request, ILogger<Program> logger) =>
+app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, GraphSearchService graphSearchService, ChatRequest request, ILogger<Program> logger) =>
 {
     var requestId = Guid.NewGuid().ToString("N")[..8];
     logger.LogInformation("🔥 [Request {RequestId}] Starting Copilot chat request", requestId);
     logger.LogInformation("📝 [Request {RequestId}] Prompt: '{Prompt}'", requestId, request.Prompt?.Substring(0, Math.Min(request.Prompt.Length, 100)) + (request.Prompt?.Length > 100 ? "..." : ""));
     logger.LogInformation("🔑 [Request {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(request.AccessToken));
     logger.LogInformation("💬 [Request {RequestId}] Conversation ID: {ConversationId}", requestId, request.ConversationId ?? "NEW");
+    logger.LogInformation("🗃️ [Request {RequestId}] Selected knowledge source: {KnowledgeSource}", requestId, request.SelectedKnowledgeSource ?? "None");
     
     try
     {
@@ -220,29 +278,70 @@ app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, ChatRequ
         // Prepare the chat request
         logger.LogInformation("📤 [Request {RequestId}] Preparing chat request for M365 Copilot...", requestId);
         
-        // Prepare participants list if an agent is selected
-        List<CopilotParticipant>? participants = null;
+        // Note: SelectedAgentId is not supported by the M365 Copilot Chat API
+        // All requests go to the default M365 Copilot experience
         if (!string.IsNullOrEmpty(request.SelectedAgentId))
         {
-            participants = new List<CopilotParticipant>
+            logger.LogWarning("⚠️ [Request {RequestId}] SelectedAgentId '{AgentId}' specified but not supported by M365 Copilot Chat API. Using default Copilot.", 
+                requestId, request.SelectedAgentId);
+        }
+        
+        // Prepare the message text, incorporating instructions directly into the prompt
+        var messageText = request.Prompt ?? "";
+        
+        // If additional instructions are provided, prepend them to the main prompt
+        if (!string.IsNullOrWhiteSpace(request.AdditionalInstructions))
+        {
+            messageText = $"{request.AdditionalInstructions}\n\n{messageText}";
+            logger.LogInformation("📋 [Request {RequestId}] Embedded instructions in prompt. Total length: {Length} chars", 
+                requestId, messageText.Length);
+        }
+        // Search knowledge source if specified and embed results in prompt
+        if (!string.IsNullOrWhiteSpace(request.SelectedKnowledgeSource))
+        {
+            logger.LogInformation("🔍 [Request {RequestId}] Searching knowledge source: {ConnectionId}", requestId, request.SelectedKnowledgeSource);
+            
+            var searchResults = await graphSearchService.SearchKnowledgeSourceAsync(
+                request.AccessToken, 
+                request.SelectedKnowledgeSource, 
+                request.Prompt ?? "", // Use original prompt for search, not the modified one
+                5 // Max results
+            );
+            
+            if (searchResults.Any())
             {
-                new CopilotParticipant(request.SelectedAgentId, "application")
-            };
-            logger.LogInformation("🤖 [Request {RequestId}] Targeting specific agent: {AgentId}", requestId, request.SelectedAgentId);
+                logger.LogInformation("📊 [Request {RequestId}] Found {ResultCount} results from knowledge source", requestId, searchResults.Count);
+                
+                var knowledgeContext = graphSearchService.FormatSearchResultsAsContext(searchResults, request.SelectedKnowledgeSource);
+                
+                // Embed knowledge source results directly in the prompt
+                messageText = $"Based on the following information from {request.SelectedKnowledgeSource}:\n\n{knowledgeContext}\n\n{messageText}";
+                
+                logger.LogInformation("📚 [Request {RequestId}] Embedded knowledge source results in prompt. Total length: {Length} chars", 
+                    requestId, messageText.Length);
+            }
+            else
+            {
+                logger.LogWarning("⚠️ [Request {RequestId}] No results found in knowledge source: {ConnectionId}", requestId, request.SelectedKnowledgeSource);
+                
+                // Inform the user that no knowledge was found
+                messageText = $"Note: No information was found in {request.SelectedKnowledgeSource} knowledge source.\n\n{messageText}";
+            }
         }
         
         var chatRequest = new CopilotChatRequest(
-            Message: new CopilotConversationRequestMessage(request.Prompt ?? ""),
-            AdditionalContext: null,
+            Message: new CopilotConversationRequestMessage(messageText),
+            AdditionalContext: null, // All context now embedded in main message
             LocationHint: new CopilotConversationLocation(
                 Latitude: null,
                 Longitude: null,
                 TimeZone: request.TimeZone ?? "UTC",
                 CountryOrRegion: null,
                 CountryOrRegionConfidence: null
-            ),
-            Participants: participants
+            )
         );
+
+        logger.LogInformation("📤 [Request {RequestId}] Final prompt prepared with length: {Length} chars", requestId, messageText.Length);
 
         logger.LogInformation("🌐 [Request {RequestId}] Sending request to M365 Copilot API...", requestId);
         var startTime = DateTime.UtcNow;
@@ -304,7 +403,7 @@ app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, ChatRequ
     }
 });
 
-app.MapPost("/api/similarity/score", async (ICopilotService copilotService, SimilarityRequest request, ILogger<Program> logger) =>
+app.MapPost("/api/similarity/score", async (ICopilotService copilotService, GraphSearchService graphSearchService, SimilarityRequest request, ILogger<Program> logger) =>
 {
     var requestId = Guid.NewGuid().ToString("N")[..8];
     logger.LogInformation("📊 [Similarity {RequestId}] Starting semantic similarity evaluation using Copilot", requestId);
@@ -317,6 +416,7 @@ app.MapPost("/api/similarity/score", async (ICopilotService copilotService, Simi
         request.Actual?.Substring(0, Math.Min(request.Actual?.Length ?? 0, 100)) + (request.Actual?.Length > 100 ? "..." : ""),
         request.Actual?.Length ?? 0);
     logger.LogInformation("🔑 [Similarity {RequestId}] Has access token: {HasToken}", requestId, !string.IsNullOrEmpty(request.AccessToken));
+    logger.LogInformation("🗃️ [Similarity {RequestId}] Knowledge source: {KnowledgeSource}", requestId, request.SelectedKnowledgeSource ?? "None");
     
     try
     {
@@ -337,7 +437,7 @@ app.MapPost("/api/similarity/score", async (ICopilotService copilotService, Simi
         var conversationId = await copilotService.CreateConversationAsync(request.AccessToken);
         logger.LogInformation("✅ [Similarity {RequestId}] Created evaluation conversation: {ConversationId}", requestId, conversationId);
 
-        // Construct the evaluation prompt
+        // Construct the evaluation prompt, embedding any additional instructions
         var evaluationPrompt = $@"You are an expert evaluator. Please compare these two responses and determine if they provide semantically equivalent answers.
 
 Expected Response: ""{request.Expected ?? ""}""
@@ -367,18 +467,24 @@ Scoring guide:
 
 Focus on semantic meaning rather than exact word matching. Start your response with 'Score:'";
 
-        // Create the chat request for evaluation
+        // Embed additional instructions directly in the prompt if provided
+        if (!string.IsNullOrWhiteSpace(request.AdditionalInstructions))
+        {
+            evaluationPrompt = $"{request.AdditionalInstructions}\n\n{evaluationPrompt}";
+            logger.LogInformation("📋 [Similarity {RequestId}] Embedded additional evaluation instructions in prompt", requestId);
+        }
+
+        // Create the chat request for evaluation (no additional context needed)
         var chatRequest = new CopilotChatRequest(
             Message: new CopilotConversationRequestMessage(evaluationPrompt),
-            AdditionalContext: null,
+            AdditionalContext: null, // All instructions now embedded in main prompt
             LocationHint: new CopilotConversationLocation(
                 Latitude: null,
                 Longitude: null,
                 TimeZone: "UTC",
                 CountryOrRegion: null,
                 CountryOrRegionConfidence: null
-            ),
-            Participants: null
+            )
         );
 
         logger.LogInformation("🌐 [Similarity {RequestId}] Sending evaluation request to Copilot...", requestId);
@@ -576,7 +682,3 @@ static (double score, string reasoning, string differences) ParseEvaluationRespo
         return (0.5, $"Error parsing response: {ex.Message}", "Unable to determine differences due to parsing error");
     }
 }
-
-// Request/Response models for similarity
-public record SimilarityRequest(string Expected, string Actual, string AccessToken);
-public record SimilarityResponse(double Score, bool Success, string? Error = null, string? Reasoning = null, string? Differences = null);
