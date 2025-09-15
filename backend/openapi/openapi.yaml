@@ -1,0 +1,931 @@
+openapi: 3.0.3
+info:
+  title: Copilot Evaluation API
+  description: |
+    REST API for managing job lifecycle in the Copilot Evaluation platform.
+    The job system allows users to submit evaluation tasks that run asynchronously
+    and track their progress through completion.
+  version: 1.0.0
+  contact:
+    name: Copilot Evaluation Team
+    url: https://github.com/boddev/copilotEval
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.copiloteval.com/api
+    description: Production server
+  - url: http://localhost:5000/api
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the API
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: "Healthy"
+                  Timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-15T10:30:00Z"
+
+  /jobs:
+    post:
+      summary: Submit a new evaluation job
+      description: Submit a new evaluation job for processing
+      operationId: submitJob
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: Unique key to ensure idempotent requests (UUID recommended)
+          schema:
+            type: string
+            format: uuid
+        - name: traceparent
+          in: header
+          description: W3C Trace Context for distributed tracing
+          schema:
+            type: string
+            pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+            example: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobCreateRequest'
+            examples:
+              bulk_evaluation:
+                summary: Bulk evaluation job
+                value:
+                  name: "Edgar Filing Evaluation"
+                  description: "Evaluate Copilot responses against Edgar filing data"
+                  type: "bulk_evaluation"
+                  configuration:
+                    data_source: "edgar-validation-data.csv"
+                    prompt_template: "Based on the following financial data: {context}, provide an analysis."
+                    evaluation_criteria:
+                      similarity_threshold: 0.8
+                      use_semantic_scoring: true
+                    agent_configuration:
+                      selected_agent_id: null
+                      additional_instructions: "Focus on financial accuracy"
+                      knowledge_source: "edgar_filings"
+              large_payload:
+                summary: Job with large payload reference
+                value:
+                  name: "Large Dataset Evaluation"
+                  description: "Evaluate responses against large dataset"
+                  type: "bulk_evaluation"
+                  configuration:
+                    data_source_blob_ref: "https://storage.blob.core.windows.net/datasets/large-dataset.csv"
+                    prompt_template: "Analyze the following data: {context}"
+                    evaluation_criteria:
+                      similarity_threshold: 0.85
+                      use_semantic_scoring: true
+                    agent_configuration:
+                      selected_agent_id: "gpt-4"
+                      additional_instructions: "Be thorough in analysis"
+                      knowledge_source: null
+      responses:
+        '201':
+          description: Job created successfully
+          headers:
+            Location:
+              description: URL to the created job resource
+              schema:
+                type: string
+                format: uri
+                example: "/api/jobs/job_abc123def456"
+            X-Request-ID:
+              description: Unique request identifier
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: List evaluation jobs
+      description: Retrieve a paginated list of evaluation jobs with optional filtering
+      operationId: listJobs
+      parameters:
+        - name: status
+          in: query
+          description: Filter by job status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: type
+          in: query
+          description: Filter by job type
+          schema:
+            type: string
+            enum: [bulk_evaluation, single_evaluation, batch_processing]
+        - name: page
+          in: query
+          description: Page number for pagination (min 1)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of items per page (min 1, max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          description: Sort field
+          schema:
+            type: string
+            enum: [created_at, updated_at, name]
+            default: created_at
+        - name: order
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: traceparent
+          in: header
+          description: W3C Trace Context for distributed tracing
+          schema:
+            type: string
+            pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+      responses:
+        '200':
+          description: Successfully retrieved jobs list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /jobs/{id}:
+    get:
+      summary: Get job details
+      description: Retrieve detailed information about a specific job
+      operationId: getJobById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            pattern: '^job_[a-zA-Z0-9]{12}$'
+            example: "job_abc123def456"
+        - name: traceparent
+          in: header
+          description: W3C Trace Context for distributed tracing
+          schema:
+            type: string
+            pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+      responses:
+        '200':
+          description: Job details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetails'
+        '404':
+          description: Job not found or user doesn't have access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Cancel a job
+      description: Cancel a running or pending job
+      operationId: cancelJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            pattern: '^job_[a-zA-Z0-9]{12}$'
+        - name: traceparent
+          in: header
+          description: W3C Trace Context for distributed tracing
+          schema:
+            type: string
+            pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Job cannot be cancelled (already completed or failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /jobs/{id}/results:
+    get:
+      summary: Download job results
+      description: Download the results of a completed job
+      operationId: downloadJobResults
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            pattern: '^job_[a-zA-Z0-9]{12}$'
+        - name: format
+          in: query
+          description: Result format
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        '200':
+          description: Job results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResults'
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Job not found or results not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Results have expired and are no longer available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 Bearer token obtained from Microsoft identity platform
+
+  schemas:
+    JobCreateRequest:
+      type: object
+      required:
+        - name
+        - type
+        - configuration
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Human-readable job name
+          example: "Edgar Filing Evaluation"
+        description:
+          type: string
+          maxLength: 1000
+          description: Optional job description
+          example: "Evaluate Copilot responses against Edgar filing data"
+        type:
+          type: string
+          enum: [bulk_evaluation, single_evaluation, batch_processing]
+          description: Type of evaluation job
+          example: "bulk_evaluation"
+        configuration:
+          $ref: '#/components/schemas/JobConfiguration'
+
+    JobConfiguration:
+      type: object
+      properties:
+        data_source:
+          type: string
+          description: Path to data source file for normal payloads
+          example: "edgar-validation-data.csv"
+        data_source_blob_ref:
+          type: string
+          format: uri
+          description: Blob storage reference for large payloads
+          example: "https://storage.blob.core.windows.net/datasets/large-dataset.csv"
+        prompt_template:
+          type: string
+          description: Template for prompts with {context} placeholder
+          example: "Based on the following financial data: {context}, provide an analysis."
+        evaluation_criteria:
+          $ref: '#/components/schemas/EvaluationCriteria'
+        agent_configuration:
+          $ref: '#/components/schemas/AgentConfiguration'
+      oneOf:
+        - required: [data_source]
+        - required: [data_source_blob_ref]
+
+    EvaluationCriteria:
+      type: object
+      properties:
+        similarity_threshold:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Minimum similarity score for passing evaluation
+          example: 0.8
+        use_semantic_scoring:
+          type: boolean
+          description: Whether to use semantic similarity scoring
+          default: true
+        custom_evaluators:
+          type: array
+          items:
+            type: string
+          description: List of custom evaluator names to apply
+
+    AgentConfiguration:
+      type: object
+      properties:
+        selected_agent_id:
+          type: string
+          nullable: true
+          description: ID of the selected agent (null for default Copilot)
+          example: "gpt-4"
+        additional_instructions:
+          type: string
+          description: Additional instructions for the agent
+          example: "Focus on financial accuracy"
+        knowledge_source:
+          type: string
+          nullable: true
+          description: Knowledge source connection ID
+          example: "edgar_filings"
+
+    Job:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - status
+        - created_at
+        - updated_at
+        - progress
+        - configuration
+      properties:
+        id:
+          type: string
+          pattern: '^job_[a-zA-Z0-9]{12}$'
+          description: Unique job identifier
+          example: "job_abc123def456"
+        name:
+          type: string
+          description: Human-readable job name
+          example: "Edgar Filing Evaluation"
+        description:
+          type: string
+          nullable: true
+          description: Job description
+          example: "Evaluate Copilot responses against Edgar filing data"
+        type:
+          type: string
+          enum: [bulk_evaluation, single_evaluation, batch_processing]
+          description: Type of evaluation job
+          example: "bulk_evaluation"
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+          description: Current job status
+          example: "pending"
+        created_at:
+          type: string
+          format: date-time
+          description: Job creation timestamp
+          example: "2024-01-15T10:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+          example: "2024-01-15T10:30:00Z"
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Job completion timestamp
+          example: "2024-01-15T11:15:00Z"
+        estimated_completion:
+          type: string
+          format: date-time
+          nullable: true
+          description: Estimated completion time
+          example: "2024-01-15T11:00:00Z"
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+        configuration:
+          $ref: '#/components/schemas/JobConfiguration'
+        error_details:
+          $ref: '#/components/schemas/JobErrorDetails'
+          nullable: true
+
+    JobDetails:
+      allOf:
+        - $ref: '#/components/schemas/Job'
+        - type: object
+          properties:
+            results:
+              $ref: '#/components/schemas/JobResults'
+              nullable: true
+
+    JobProgress:
+      type: object
+      required:
+        - total_items
+        - completed_items
+        - percentage
+      properties:
+        total_items:
+          type: integer
+          minimum: 0
+          description: Total number of items to process
+          example: 100
+        completed_items:
+          type: integer
+          minimum: 0
+          description: Number of completed items
+          example: 45
+        percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Completion percentage
+          example: 45.0
+
+    JobErrorDetails:
+      type: object
+      properties:
+        error_code:
+          type: string
+          description: Machine-readable error code
+          example: "DATA_SOURCE_UNAVAILABLE"
+        error_message:
+          type: string
+          description: Human-readable error message
+          example: "Unable to access the specified data source file"
+        error_timestamp:
+          type: string
+          format: date-time
+          description: When the error occurred
+          example: "2024-01-15T12:05:00Z"
+        retry_possible:
+          type: boolean
+          description: Whether the job can be retried
+          example: true
+
+    JobResults:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/ResultsSummary'
+        download_url:
+          type: string
+          format: uri
+          description: URL to download full results
+          example: "/api/jobs/job_abc123def456/results"
+        detailed_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluationResult'
+          description: Detailed evaluation results (may be truncated)
+
+    ResultsSummary:
+      type: object
+      properties:
+        total_evaluations:
+          type: integer
+          description: Total number of evaluations performed
+          example: 100
+        passed_evaluations:
+          type: integer
+          description: Number of evaluations that passed
+          example: 87
+        failed_evaluations:
+          type: integer
+          description: Number of evaluations that failed
+          example: 13
+        average_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Average similarity score across all evaluations
+          example: 0.83
+        pass_rate:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Percentage of evaluations that passed
+          example: 0.87
+
+    EvaluationResult:
+      type: object
+      properties:
+        item_id:
+          type: string
+          description: Unique identifier for the evaluation item
+          example: "item_001"
+        prompt:
+          type: string
+          description: The prompt that was evaluated
+          example: "What is the revenue for Q4 2023?"
+        expected_response:
+          type: string
+          description: The expected response
+          example: "The revenue for Q4 2023 was $2.5B"
+        actual_response:
+          type: string
+          description: The actual response from the agent
+          example: "Q4 2023 revenue totaled $2.5 billion"
+        similarity_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Calculated similarity score
+          example: 0.95
+        passed:
+          type: boolean
+          description: Whether the evaluation passed the threshold
+          example: true
+        evaluation_details:
+          $ref: '#/components/schemas/EvaluationDetails'
+
+    EvaluationDetails:
+      type: object
+      properties:
+        reasoning:
+          type: string
+          description: Explanation of the evaluation reasoning
+          example: "Both responses convey the same information with minor wording differences"
+        differences:
+          type: string
+          description: Key differences identified
+          example: "Expected uses '$2.5B' while actual uses '$2.5 billion'"
+
+    JobListResponse:
+      type: object
+      required:
+        - jobs
+        - pagination
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+
+    PaginationInfo:
+      type: object
+      required:
+        - current_page
+        - total_pages
+        - total_items
+        - items_per_page
+        - has_next
+        - has_previous
+      properties:
+        current_page:
+          type: integer
+          minimum: 1
+          description: Current page number
+          example: 1
+        total_pages:
+          type: integer
+          minimum: 0
+          description: Total number of pages
+          example: 5
+        total_items:
+          type: integer
+          minimum: 0
+          description: Total number of items across all pages
+          example: 92
+        items_per_page:
+          type: integer
+          minimum: 1
+          description: Number of items per page
+          example: 20
+        has_next:
+          type: boolean
+          description: Whether there is a next page
+          example: true
+        has_previous:
+          type: boolean
+          description: Whether there is a previous page
+          example: false
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              example: "INVALID_REQUEST"
+            message:
+              type: string
+              description: Human-readable error description
+              example: "The request body contains invalid parameters"
+            details:
+              type: object
+              additionalProperties: true
+              description: Additional error details
+              example:
+                field: "data_source"
+                trace_id: "4bf92f3577b34da6a3ce929d0e0e4736"
+
+    # JobMessage schema for queue processing
+    JobMessage:
+      type: object
+      required:
+        - job_id
+        - message_type
+        - created_at
+        - payload
+      properties:
+        job_id:
+          type: string
+          pattern: '^job_[a-zA-Z0-9]{12}$'
+          description: Associated job identifier
+          example: "job_abc123def456"
+        message_type:
+          type: string
+          enum: [job_created, job_started, job_progress, job_completed, job_failed, job_cancelled]
+          description: Type of job message
+          example: "job_created"
+        created_at:
+          type: string
+          format: date-time
+          description: Message creation timestamp
+          example: "2024-01-15T10:30:00Z"
+        correlation_id:
+          type: string
+          format: uuid
+          description: Correlation ID for tracking related messages
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        retry_count:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Number of processing retry attempts
+          example: 0
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/JobCreatedPayload'
+            - $ref: '#/components/schemas/JobProgressPayload'
+            - $ref: '#/components/schemas/JobCompletedPayload'
+            - $ref: '#/components/schemas/JobFailedPayload'
+          description: Message-specific payload data
+        blob_references:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlobReference'
+          description: References to large payload data stored in blob storage
+
+    JobCreatedPayload:
+      type: object
+      properties:
+        job:
+          $ref: '#/components/schemas/Job'
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+          default: normal
+          description: Job processing priority
+
+    JobProgressPayload:
+      type: object
+      properties:
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+        current_item:
+          type: string
+          description: Currently processing item identifier
+        estimated_time_remaining:
+          type: string
+          format: duration
+          description: ISO 8601 duration format
+          example: "PT15M30S"
+
+    JobCompletedPayload:
+      type: object
+      properties:
+        results_summary:
+          $ref: '#/components/schemas/ResultsSummary'
+        results_blob_ref:
+          $ref: '#/components/schemas/BlobReference'
+          description: Reference to detailed results in blob storage
+
+    JobFailedPayload:
+      type: object
+      properties:
+        error_details:
+          $ref: '#/components/schemas/JobErrorDetails'
+        partial_results:
+          $ref: '#/components/schemas/BlobReference'
+          nullable: true
+          description: Reference to partial results if any were generated
+
+    BlobReference:
+      type: object
+      required:
+        - blob_id
+        - storage_account
+        - container
+        - blob_name
+        - content_type
+        - size_bytes
+      properties:
+        blob_id:
+          type: string
+          format: uuid
+          description: Unique identifier for the blob reference
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        storage_account:
+          type: string
+          description: Azure storage account name
+          example: "copilotevaldata"
+        container:
+          type: string
+          description: Storage container name
+          example: "job-data"
+        blob_name:
+          type: string
+          description: Blob file name/path
+          example: "jobs/2024/01/job_abc123def456/results.json"
+        content_type:
+          type: string
+          description: MIME type of the blob content
+          example: "application/json"
+        size_bytes:
+          type: integer
+          minimum: 0
+          description: Size of the blob in bytes
+          example: 2048576
+        created_at:
+          type: string
+          format: date-time
+          description: Blob creation timestamp
+          example: "2024-01-15T10:30:00Z"
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Blob expiration timestamp
+          example: "2024-02-15T10:30:00Z"
+        access_url:
+          type: string
+          format: uri
+          description: Temporary URL for accessing the blob
+          example: "https://copilotevaldata.blob.core.windows.net/job-data/jobs/2024/01/job_abc123def456/results.json?sv=2022-11-02&ss=b&srt=o&sp=r&se=2024-01-15T11:30:00Z&st=2024-01-15T10:30:00Z&spr=https&sig=..."
+
+  responses:
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          description: Request limit per window
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          description: Requests remaining in current window
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Unix timestamp when limit resets
+          schema:
+            type: integer
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  headers:
+    X-Request-ID:
+      description: Unique request identifier for tracking
+      schema:
+        type: string
+        format: uuid
+    X-RateLimit-Limit:
+      description: Request limit per window
+      schema:
+        type: integer
+    X-RateLimit-Remaining:
+      description: Requests remaining in current window
+      schema:
+        type: integer
+    X-RateLimit-Reset:
+      description: Unix timestamp when limit resets
+      schema:
+        type: integer

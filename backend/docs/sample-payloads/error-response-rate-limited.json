@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Request rate limit exceeded",
+    "details": {
+      "limit": 100,
+      "remaining": 0,
+      "reset_time": "2024-01-15T11:00:00Z",
+      "retry_after": 60,
+      "trace_id": "7cd92f3577b34da6a3ce929d0e0e8822"
+    }
+  }
+}

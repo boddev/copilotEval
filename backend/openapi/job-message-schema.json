@@ -1,0 +1,439 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://api.copiloteval.com/schemas/job-message.json",
+  "title": "JobMessage",
+  "description": "Schema for job messages in the Copilot Evaluation queue system",
+  "type": "object",
+  "required": [
+    "job_id",
+    "message_type",
+    "created_at",
+    "payload"
+  ],
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "pattern": "^job_[a-zA-Z0-9]{12}$",
+      "description": "Associated job identifier"
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "job_created",
+        "job_started",
+        "job_progress",
+        "job_completed",
+        "job_failed",
+        "job_cancelled"
+      ],
+      "description": "Type of job message"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Message creation timestamp"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Correlation ID for tracking related messages"
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Number of processing retry attempts"
+    },
+    "payload": {
+      "description": "Message-specific payload data",
+      "type": "object"
+    },
+    "blob_references": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/BlobReference"
+      },
+      "description": "References to large payload data stored in blob storage"
+    }
+  },
+  "definitions": {
+    "JobCreatedPayload": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/definitions/Job"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "normal", "high", "urgent"],
+          "default": "normal",
+          "description": "Job processing priority"
+        }
+      }
+    },
+    "JobProgressPayload": {
+      "type": "object",
+      "properties": {
+        "progress": {
+          "$ref": "#/definitions/JobProgress"
+        },
+        "current_item": {
+          "type": "string",
+          "description": "Currently processing item identifier"
+        },
+        "estimated_time_remaining": {
+          "type": "string",
+          "description": "ISO 8601 duration format"
+        }
+      }
+    },
+    "JobCompletedPayload": {
+      "type": "object",
+      "properties": {
+        "results_summary": {
+          "$ref": "#/definitions/ResultsSummary"
+        },
+        "results_blob_ref": {
+          "$ref": "#/definitions/BlobReference"
+        }
+      }
+    },
+    "JobFailedPayload": {
+      "type": "object",
+      "properties": {
+        "error_details": {
+          "$ref": "#/definitions/JobErrorDetails"
+        },
+        "partial_results": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BlobReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Job": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "type",
+        "status",
+        "created_at",
+        "updated_at",
+        "progress",
+        "configuration"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^job_[a-zA-Z0-9]{12}$",
+          "description": "Unique job identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable job name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Job description"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["bulk_evaluation", "single_evaluation", "batch_processing"],
+          "description": "Type of evaluation job"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "running", "completed", "failed", "cancelled"],
+          "description": "Current job status"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Job creation timestamp"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Job completion timestamp"
+        },
+        "estimated_completion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Estimated completion time"
+        },
+        "progress": {
+          "$ref": "#/definitions/JobProgress"
+        },
+        "configuration": {
+          "$ref": "#/definitions/JobConfiguration"
+        },
+        "error_details": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JobErrorDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "JobProgress": {
+      "type": "object",
+      "required": [
+        "total_items",
+        "completed_items",
+        "percentage"
+      ],
+      "properties": {
+        "total_items": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of items to process"
+        },
+        "completed_items": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of completed items"
+        },
+        "percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Completion percentage"
+        }
+      }
+    },
+    "JobConfiguration": {
+      "type": "object",
+      "properties": {
+        "data_source": {
+          "type": "string",
+          "description": "Path to data source file for normal payloads"
+        },
+        "data_source_blob_ref": {
+          "type": "string",
+          "format": "uri",
+          "description": "Blob storage reference for large payloads"
+        },
+        "prompt_template": {
+          "type": "string",
+          "description": "Template for prompts with {context} placeholder"
+        },
+        "evaluation_criteria": {
+          "$ref": "#/definitions/EvaluationCriteria"
+        },
+        "agent_configuration": {
+          "$ref": "#/definitions/AgentConfiguration"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["data_source"]
+        },
+        {
+          "required": ["data_source_blob_ref"]
+        }
+      ]
+    },
+    "EvaluationCriteria": {
+      "type": "object",
+      "properties": {
+        "similarity_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Minimum similarity score for passing evaluation"
+        },
+        "use_semantic_scoring": {
+          "type": "boolean",
+          "description": "Whether to use semantic similarity scoring",
+          "default": true
+        },
+        "custom_evaluators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of custom evaluator names to apply"
+        }
+      }
+    },
+    "AgentConfiguration": {
+      "type": "object",
+      "properties": {
+        "selected_agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ID of the selected agent (null for default Copilot)"
+        },
+        "additional_instructions": {
+          "type": "string",
+          "description": "Additional instructions for the agent"
+        },
+        "knowledge_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Knowledge source connection ID"
+        }
+      }
+    },
+    "JobErrorDetails": {
+      "type": "object",
+      "properties": {
+        "error_code": {
+          "type": "string",
+          "description": "Machine-readable error code"
+        },
+        "error_message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "error_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the error occurred"
+        },
+        "retry_possible": {
+          "type": "boolean",
+          "description": "Whether the job can be retried"
+        }
+      }
+    },
+    "ResultsSummary": {
+      "type": "object",
+      "properties": {
+        "total_evaluations": {
+          "type": "integer",
+          "description": "Total number of evaluations performed"
+        },
+        "passed_evaluations": {
+          "type": "integer",
+          "description": "Number of evaluations that passed"
+        },
+        "failed_evaluations": {
+          "type": "integer",
+          "description": "Number of evaluations that failed"
+        },
+        "average_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Average similarity score across all evaluations"
+        },
+        "pass_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Percentage of evaluations that passed"
+        }
+      }
+    },
+    "BlobReference": {
+      "type": "object",
+      "required": [
+        "blob_id",
+        "storage_account",
+        "container",
+        "blob_name",
+        "content_type",
+        "size_bytes"
+      ],
+      "properties": {
+        "blob_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique identifier for the blob reference"
+        },
+        "storage_account": {
+          "type": "string",
+          "description": "Azure storage account name"
+        },
+        "container": {
+          "type": "string",
+          "description": "Storage container name"
+        },
+        "blob_name": {
+          "type": "string",
+          "description": "Blob file name/path"
+        },
+        "content_type": {
+          "type": "string",
+          "description": "MIME type of the blob content"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the blob in bytes"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Blob creation timestamp"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Blob expiration timestamp"
+        },
+        "access_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Temporary URL for accessing the blob"
+        }
+      }
+    }
+  }
+}

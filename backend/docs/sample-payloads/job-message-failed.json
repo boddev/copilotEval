@@ -1,0 +1,39 @@
+{
+  "job_id": "job_xyz789ghi012",
+  "message_type": "job_failed",
+  "created_at": "2024-01-15T12:05:00Z",
+  "correlation_id": "a1b2c3d4-e5f6-4789-9abc-def012345678",
+  "retry_count": 2,
+  "payload": {
+    "error_details": {
+      "error_code": "DATA_SOURCE_UNAVAILABLE",
+      "error_message": "Unable to access the specified data source file",
+      "error_timestamp": "2024-01-15T12:05:00Z",
+      "retry_possible": true
+    },
+    "partial_results": {
+      "blob_id": "aa1b2c3d-e4f5-4678-9abc-def012345678",
+      "storage_account": "copilotevaldata",
+      "container": "job-results",
+      "blob_name": "jobs/2024/01/job_xyz789ghi012/partial-results.json",
+      "content_type": "application/json",
+      "size_bytes": 512000,
+      "created_at": "2024-01-15T12:05:00Z",
+      "expires_at": "2024-01-22T12:05:00Z",
+      "access_url": "https://copilotevaldata.blob.core.windows.net/job-results/jobs/2024/01/job_xyz789ghi012/partial-results.json?sv=2022-11-02&ss=b&srt=o&sp=r&se=2024-01-15T13:05:00Z&st=2024-01-15T12:05:00Z&spr=https&sig=..."
+    }
+  },
+  "blob_references": [
+    {
+      "blob_id": "aa1b2c3d-e4f5-4678-9abc-def012345678",
+      "storage_account": "copilotevaldata",
+      "container": "job-results",
+      "blob_name": "jobs/2024/01/job_xyz789ghi012/partial-results.json",
+      "content_type": "application/json",
+      "size_bytes": 512000,
+      "created_at": "2024-01-15T12:05:00Z",
+      "expires_at": "2024-01-22T12:05:00Z",
+      "access_url": "https://copilotevaldata.blob.core.windows.net/job-results/jobs/2024/01/job_xyz789ghi012/partial-results.json?sv=2022-11-02&ss=b&srt=o&sp=r&se=2024-01-15T13:05:00Z&st=2024-01-15T12:05:00Z&spr=https&sig=..."
+    }
+  ]
+}
