@@ -3,7 +3,11 @@ import Papa from 'papaparse';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import ValidationTable from './components/ValidationTable';
+import JobSubmission from './components/JobSubmission';
+import JobList from './components/JobList';
+import JobStatus from './components/JobStatus';
 import { ValidationEntry } from './types/ValidationEntry';
+import { Job } from './types/Job';
 import { authService, CopilotChatRequest, ExternalConnection } from './services/authService';
 import './App.css';
 
@@ -16,6 +20,7 @@ interface CsvRow {
 }
 
 function App() {
+  // Existing validation state
   const [entries, setEntries] = useState<ValidationEntry[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -23,6 +28,13 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [knowledgeSources, setKnowledgeSources] = useState<ExternalConnection[]>([]);
   const [isLoadingKnowledgeSources, setIsLoadingKnowledgeSources] = useState(false);
+
+  // New job management state
+  const [activeTab, setActiveTab] = useState<'validation' | 'jobs'>('validation');
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [showJobStatus, setShowJobStatus] = useState(false);
+  const [statusJobId, setStatusJobId] = useState<string | null>(null);
+  const [jobListRefreshTrigger, setJobListRefreshTrigger] = useState(0);
 
   useEffect(() => {
     // Check authentication status on app load
@@ -284,6 +296,30 @@ function App() {
   const pendingEntries = entries.filter(e => e.status === 'pending').length;
   const avgScore = entries.length > 0 ? 
     entries.reduce((sum, e) => sum + (e.score || 0), 0) / entries.length : 0;
+
+  // Job management handlers
+  const handleJobSubmitted = (jobId: string, statusUrl: string) => {
+    console.log('🎉 Job submitted successfully:', jobId, statusUrl);
+    setStatusJobId(jobId);
+    setShowJobStatus(true);
+    setActiveTab('jobs');
+    setJobListRefreshTrigger(prev => prev + 1);
+    
+    // Show success notification
+    alert(`Job submitted successfully!\nJob ID: ${jobId}\nStatus URL: ${statusUrl}`);
+  };
+
+  const handleJobSelect = (job: Job) => {
+    setSelectedJob(job);
+    setStatusJobId(job.id);
+    setShowJobStatus(true);
+  };
+
+  const handleCloseJobStatus = () => {
+    setShowJobStatus(false);
+    setStatusJobId(null);
+    setSelectedJob(null);
+  };
 
   if (isAuthenticating) {
     return (
