@@ -1,0 +1,40 @@
+# Deployment artifacts
+*.log
+deployment-output.json
+
+# Local configuration files
+local.parameters.json
+*.local.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# IDE files
+.vscode/
+.vs/
+
+# Azure CLI cache
+.azure/
+
+# Backup files
+*.bak
+*.backup
+
+# Test results
+test-results/
+test-output/
+
+# Terraform state files (if mixed with Bicep)
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# ARM template generated files
+template.json
+parameters.json
+
+# Local secrets (never commit these)
+secrets.json
+local-secrets.env
+.env.local
