@@ -388,9 +388,39 @@ function App() {
 
       {/* Main Content */}
       <div className="container-fluid p-4">
-        <div className="row g-4">
-          {/* Left Panel - File Upload and Controls */}
-          <div className="col-lg-4">
+        {/* Tab Navigation */}
+        <ul className="nav nav-tabs mb-0" role="tablist">
+          <li className="nav-item" role="presentation">
+            <button
+              className={`nav-link ${activeTab === 'validation' ? 'active' : ''}`}
+              onClick={() => setActiveTab('validation')}
+              type="button"
+              role="tab"
+            >
+              <i className="bi bi-check2-square me-2"></i>
+              Validation Testing
+            </button>
+          </li>
+          <li className="nav-item" role="presentation">
+            <button
+              className={`nav-link ${activeTab === 'jobs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('jobs')}
+              type="button"
+              role="tab"
+            >
+              <i className="bi bi-gear-wide-connected me-2"></i>
+              Job Management
+            </button>
+          </li>
+        </ul>
+
+        {/* Tab Content */}
+        <div className="tab-content">
+          {/* Validation Tab */}
+          {activeTab === 'validation' && (
+            <div className="row g-4">
+              {/* Left Panel - File Upload and Controls */}
+              <div className="col-lg-4">
             <div className="card shadow-sm h-100">
               <div className="card-header bg-white">
                 <h5 className="card-title mb-0">
@@ -543,8 +573,8 @@ function App() {
             )}
           </div>
 
-          {/* Right Panel - Validation Table */}
-          <div className="col-lg-8">
+              {/* Right Panel - Validation Table */}
+              <div className="col-lg-8">
             <div className="card shadow-sm h-100">
               <div className="card-header bg-white">
                 <h5 className="card-title mb-0">
@@ -572,6 +602,38 @@ function App() {
               </div>
             </div>
           </div>
+            </div>
+          )}
+
+          {/* Jobs Tab */}
+          {activeTab === 'jobs' && (
+            <div className="row g-4">
+              {/* Job Status Modal/Panel */}
+              {showJobStatus && statusJobId && (
+                <div className="col-12">
+                  <JobStatus
+                    jobId={statusJobId}
+                    onClose={handleCloseJobStatus}
+                    autoRefresh={true}
+                    refreshInterval={5000}
+                  />
+                </div>
+              )}
+
+              {/* Job Submission */}
+              <div className="col-lg-4">
+                <JobSubmission onJobSubmitted={handleJobSubmitted} />
+              </div>
+
+              {/* Job List */}
+              <div className="col-lg-8">
+                <JobList
+                  onJobSelect={handleJobSelect}
+                  refreshTrigger={jobListRefreshTrigger}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
