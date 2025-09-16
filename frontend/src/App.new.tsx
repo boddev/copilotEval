@@ -5,6 +5,7 @@ import 'bootstrap-icons/font/bootstrap-icons.css';
 import ValidationTable from './components/ValidationTable';
 import { ValidationEntry } from './types/ValidationEntry';
 import { authService, CopilotChatRequest } from './services/authService';
+import telemetryService from './services/telemetryService';
 import './App.css';
 
 interface CsvRow {
@@ -20,6 +21,9 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Track page view
+    telemetryService.trackPageView('CopilotEval App');
+    
     // Check authentication status on app load
     setIsAuthenticated(authService.isAuthenticated());
 
@@ -59,30 +63,61 @@ function App() {
     setIsAuthenticating(true);
     setAuthError(null);
 
+    telemetryService.trackUserAction('login_attempt', 'auth_button');
+
     try {
       const redirectUri = `${window.location.origin}${window.location.pathname}`;
       const authResponse = await authService.getAuthUrl(redirectUri);
+      
+      telemetryService.trackEvent('auth_url_generated', {
+        redirectUri,
+        success: true
+      });
+      
       window.location.href = authResponse.authUrl;
     } catch (error) {
       console.error('Login error:', error);
       setAuthError('Failed to initiate authentication. Please check your configuration.');
       setIsAuthenticating(false);
+      
+      telemetryService.trackEvent('login_failed', {
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        step: 'auth_url_generation'
+      });
+      
+      telemetryService.trackException(error instanceof Error ? error : new Error('Unknown login error'), {
+        step: 'auth_url_generation'
+      });
     }
   };
 
   const handleLogout = () => {
+    telemetryService.trackUserAction('logout', 'auth_button');
+    telemetryService.clearUser();
+    
     authService.logout();
     setIsAuthenticated(false);
+    
+    telemetryService.trackEvent('user_logged_out', {
+      success: true
+    });
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const startTime = performance.now();
+    telemetryService.trackUserAction('csv_upload_started', file.name, {
+      fileSize: file.size,
+      fileType: file.type
+    });
+
     Papa.parse<CsvRow>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
+        const duration = performance.now() - startTime;
         const newEntries: ValidationEntry[] = results.data.map((row, index) => ({
           id: Date.now() + index,
           prompt: row.prompt || '',
@@ -92,10 +127,35 @@ function App() {
           status: 'pending' as const
         }));
         setEntries(prev => [...prev, ...newEntries]);
+
+        telemetryService.trackValidationEvent('upload', {
+          fileName: file.name,
+          entriesCount: newEntries.length,
+          success: true
+        }, {
+          processingTime: duration,
+          fileSize: file.size
+        });
       },
       error: (error) => {
+        const duration = performance.now() - startTime;
         console.error('CSV parsing error:', error);
         alert('Error parsing CSV file. Please check the format.');
+        
+        telemetryService.trackValidationEvent('error', {
+          fileName: file.name,
+          errorType: 'csv_parse_error',
+          errorMessage: error.message,
+          success: false
+        }, {
+          processingTime: duration,
+          fileSize: file.size
+        });
+        
+        telemetryService.trackException(new Error(`CSV parsing error: ${error.message}`), {
+          fileName: file.name,
+          fileSize: file.size
+        });
       }
     });
 
@@ -132,15 +192,28 @@ function App() {
   const processEntries = async () => {
     if (!isAuthenticated) {
       alert('Please log in to Microsoft 365 first.');
+      telemetryService.trackEvent('process_entries_unauthorized');
       return;
     }
 
+    const startTime = performance.now();
     setIsProcessing(true);
     
     const pendingEntries = entries.filter(entry => entry.status === 'pending' && entry.prompt.trim());
     
+    telemetryService.trackValidationEvent('process', {
+      totalEntries: entries.length,
+      pendingEntries: pendingEntries.length,
+      batchSize: pendingEntries.length
+    });
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
     for (const entry of pendingEntries) {
       updateEntry(entry.id, { status: 'processing' });
+      
+      const entryStartTime = performance.now();
       
       try {
         const chatRequest: Omit<CopilotChatRequest, 'accessToken'> = {
@@ -149,6 +222,7 @@ function App() {
         };
 
         const chatResponse = await authService.chatWithCopilot(chatRequest);
+        const entryDuration = performance.now() - entryStartTime;
         
         if (chatResponse.success) {
           updateEntry(entry.id, { 
@@ -156,19 +230,44 @@ function App() {
             status: 'completed'
           });
 
+          successCount++;
+          
+          telemetryService.trackEvent('chat_request_success', {
+            promptLength: entry.prompt.length,
+            responseLength: chatResponse.response.length,
+            entryId: entry.id
+          }, {
+            requestDuration: entryDuration
+          });
+
           // Calculate similarity score
           if (entry.expectedOutput.trim()) {
             try {
+              const similarityStartTime = performance.now();
               const similarityResponse = await authService.calculateSimilarity({
                 expected: entry.expectedOutput,
                 actual: chatResponse.response
               });
+              const similarityDuration = performance.now() - similarityStartTime;
               
               if (similarityResponse.success) {
                 updateEntry(entry.id, { score: similarityResponse.score });
+                
+                telemetryService.trackEvent('similarity_calculation_success', {
+                  score: similarityResponse.score,
+                  entryId: entry.id,
+                  expectedLength: entry.expectedOutput.length,
+                  actualLength: chatResponse.response.length
+                }, {
+                  calculationDuration: similarityDuration
+                });
               }
             } catch (error) {
               console.error('Similarity calculation error:', error);
+              telemetryService.trackException(error instanceof Error ? error : new Error('Similarity calculation failed'), {
+                entryId: entry.id,
+                step: 'similarity_calculation'
+              });
             }
           }
         } else {
@@ -176,18 +275,56 @@ function App() {
             actualOutput: chatResponse.error || 'Unknown error',
             status: 'error'
           });
+          
+          errorCount++;
+          
+          telemetryService.trackEvent('chat_request_failed', {
+            errorMessage: chatResponse.error || 'Unknown error',
+            promptLength: entry.prompt.length,
+            entryId: entry.id
+          }, {
+            requestDuration: entryDuration
+          });
         }
       } catch (error) {
+        const entryDuration = performance.now() - entryStartTime;
         console.error('Chat error:', error);
         updateEntry(entry.id, { 
           actualOutput: 'Failed to get response from Copilot',
           status: 'error'
+        });
+        
+        errorCount++;
+        
+        telemetryService.trackEvent('chat_request_exception', {
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          promptLength: entry.prompt.length,
+          entryId: entry.id
+        }, {
+          requestDuration: entryDuration
+        });
+        
+        telemetryService.trackException(error instanceof Error ? error : new Error('Chat request failed'), {
+          entryId: entry.id,
+          promptLength: entry.prompt.length
         });
       }
 
       // Add delay between requests to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    
+    const totalDuration = performance.now() - startTime;
+    
+    telemetryService.trackValidationEvent('complete', {
+      totalProcessed: pendingEntries.length,
+      successCount,
+      errorCount,
+      successRate: pendingEntries.length > 0 ? (successCount / pendingEntries.length) * 100 : 0
+    }, {
+      totalProcessingTime: totalDuration,
+      averageTimePerEntry: pendingEntries.length > 0 ? totalDuration / pendingEntries.length : 0
+    });
     
     setIsProcessing(false);
   };

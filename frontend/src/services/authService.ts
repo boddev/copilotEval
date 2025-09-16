@@ -1,4 +1,5 @@
 import axios from 'axios';
+import telemetryService from './telemetryService';
 
 const API_BASE_URL = '/api';
 
@@ -206,11 +207,49 @@ class AuthService {
     });
 
     try {
-      const response = await axios.post<CopilotChatResponse>(`${API_BASE_URL}/copilot/chat`, chatRequest);
+      const correlationHeaders = telemetryService.getCorrelationHeaders();
+      const response = await axios.post<CopilotChatResponse>(`${API_BASE_URL}/copilot/chat`, chatRequest, {
+        headers: {
+          ...correlationHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
       console.log('📥 Backend response:', response.data);
+      
+      // Track successful API call
+      telemetryService.trackApiCall(
+        'copilot_chat',
+        `${API_BASE_URL}/copilot/chat`,
+        response.config.metadata?.duration || 0,
+        true,
+        response.status,
+        {
+          promptLength: request.prompt.length,
+          hasConversationId: !!request.conversationId
+        }
+      );
+      
       return response.data;
     } catch (error) {
       console.error('❌ Chat request failed:', error);
+      
+      // Track failed API call
+      const duration = axios.isAxiosError(error) ? error.config?.metadata?.duration || 0 : 0;
+      const statusCode = axios.isAxiosError(error) ? error.response?.status : undefined;
+      
+      telemetryService.trackApiCall(
+        'copilot_chat',
+        `${API_BASE_URL}/copilot/chat`,
+        duration,
+        false,
+        statusCode,
+        {
+          promptLength: request.prompt.length,
+          hasConversationId: !!request.conversationId,
+          errorType: axios.isAxiosError(error) ? 'axios_error' : 'unknown_error'
+        }
+      );
+      
       if (axios.isAxiosError(error)) {
         console.error('❌ Response status:', error.response?.status);
         console.error('❌ Response data:', error.response?.data);
@@ -236,7 +275,13 @@ class AuthService {
       hasAccessToken: !!accessToken
     });
 
-    const response = await axios.post<SimilarityResponse>(`${API_BASE_URL}/similarity/score`, fullRequest);
+    const correlationHeaders = telemetryService.getCorrelationHeaders();
+    const response = await axios.post<SimilarityResponse>(`${API_BASE_URL}/similarity/score`, fullRequest, {
+      headers: {
+        ...correlationHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
     
     console.log('📈 Similarity response:', {
       score: response.data.score,

@@ -2,6 +2,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CopilotEvalApi.Models;
+using CopilotEvalApi.Observability;
+using System.Diagnostics;
 
 namespace CopilotEvalApi.Services;
 
@@ -79,6 +81,14 @@ public class CopilotService : ICopilotService
 
     public async Task<CopilotConversation> ChatAsync(string accessToken, string conversationId, CopilotChatRequest request)
     {
+        using var activity = Telemetry.ActivitySource.StartActivity(Telemetry.Activities.CopilotApiCall);
+        activity?.SetTag(Telemetry.Tags.ApiEndpoint, "chat");
+        activity?.SetTag("conversation.id", conversationId);
+        activity?.SetTag("http.method", "POST");
+        activity?.SetTag("http.url", $"{_graphOptions.BaseUrl}/copilot/conversations/{conversationId}/chat");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
         try
         {
             _logger.LogInformation("💬 Starting chat message to conversation {ConversationId}", conversationId);
@@ -90,17 +100,19 @@ public class CopilotService : ICopilotService
                     ? request.Message.Text[..100] + "..." 
                     : request.Message.Text;
                 _logger.LogInformation("📨 Message: {Content}", contentPreview);
+                activity?.SetTag("message.length", request.Message.Text?.Length ?? 0);
             }
             
             if (request.AdditionalContext?.Count > 0)
             {
                 _logger.LogInformation("📚 Additional context: {ContextCount} items", request.AdditionalContext.Count);
+                activity?.SetTag("context.count", request.AdditionalContext.Count);
                 foreach (var (context, index) in request.AdditionalContext.Select((c, i) => (c, i)))
                 {
                     var contextPreview = context.Text?.Length > 100 
                         ? context.Text[..100] + "..." 
                         : context.Text;
-                    _logger.LogInformation("� Context {Index}: {Description} - {Text}", 
+                    _logger.LogInformation("📝 Context {Index}: {Description} - {Text}", 
                         index + 1, context.Description ?? "No description", contextPreview);
                 }
             }
@@ -120,6 +132,8 @@ public class CopilotService : ICopilotService
 
             httpRequest.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
             
+            activity?.SetTag("http.request.body.size", jsonContent.Length);
+            
             _logger.LogInformation("📡 Sending POST request to {Url}", httpRequest.RequestUri);
             _logger.LogInformation("📊 Request payload size: {Size} bytes", jsonContent.Length);
             _logger.LogInformation("📋 Request payload: {Payload}", jsonContent);
@@ -130,11 +144,27 @@ public class CopilotService : ICopilotService
             var response = await _httpClient.SendAsync(httpRequest);
             var responseContent = await response.Content.ReadAsStringAsync();
 
+            stopwatch.Stop();
+            
+            activity?.SetTag("http.response.status_code", (int)response.StatusCode);
+            activity?.SetTag("http.response.body.size", responseContent.Length);
+            
+            // Record API duration metrics
+            Telemetry.CopilotApiDuration.Record(stopwatch.Elapsed.TotalSeconds, new TagList
+            {
+                { Telemetry.Tags.ApiEndpoint, "chat" },
+                { "http.response.status_code", ((int)response.StatusCode).ToString() },
+                { Telemetry.Tags.Status, response.IsSuccessStatusCode ? "success" : "error" }
+            });
+
             _logger.LogInformation("📨 Received response: Status={StatusCode}, Size={Size} bytes", 
                 response.StatusCode, responseContent.Length);
 
             if (!response.IsSuccessStatusCode)
             {
+                activity?.SetTag(Telemetry.Tags.Status, "error");
+                activity?.SetTag(Telemetry.Tags.ErrorType, "HttpError");
+                
                 _logger.LogError("💥 Failed to send chat message. Status: {StatusCode}, Content: {Content}", 
                     response.StatusCode, responseContent);
                 throw new HttpRequestException($"Failed to send chat: {response.StatusCode} - {responseContent}");
@@ -147,6 +177,9 @@ public class CopilotService : ICopilotService
 
             if (chatResponse != null)
             {
+                activity?.SetTag("response.message_count", chatResponse.Messages?.Count ?? 0);
+                activity?.SetTag(Telemetry.Tags.Status, "success");
+                
                 _logger.LogInformation("✅ Chat successful! Response has {MessageCount} messages", 
                     chatResponse.Messages?.Count ?? 0);
                 
@@ -174,6 +207,19 @@ public class CopilotService : ICopilotService
         }
         catch (Exception ex)
         {
+            stopwatch.Stop();
+            
+            // Record API failure metrics
+            Telemetry.CopilotApiDuration.Record(stopwatch.Elapsed.TotalSeconds, new TagList
+            {
+                { Telemetry.Tags.ApiEndpoint, "chat" },
+                { Telemetry.Tags.Status, "error" },
+                { Telemetry.Tags.ErrorType, ex.GetType().Name }
+            });
+
+            activity?.SetTag(Telemetry.Tags.Status, "error");
+            activity?.SetTag(Telemetry.Tags.ErrorType, ex.GetType().Name);
+
             _logger.LogError(ex, "💥 Error sending chat message to conversation {ConversationId}", conversationId);
             throw;
         }
