@@ -1,14 +1,26 @@
 using Microsoft.AspNetCore.Cors;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CopilotEvalApi.Services;
 using CopilotEvalApi.Models;
+using CopilotEvalApi.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
+    });
+
+// Add Entity Framework with In-Memory database for development
+builder.Services.AddDbContext<JobDbContext>(options =>
+    options.UseInMemoryDatabase("CopilotEvalDb"));
 
 // Configure logging
 builder.Logging.ClearProviders();
@@ -33,6 +45,8 @@ builder.Services.AddHttpClient<GraphSearchService>();
 // Register services
 builder.Services.AddScoped<ICopilotService, CopilotService>();
 builder.Services.AddScoped<GraphSearchService>();
+builder.Services.AddScoped<IJobRepository, JobRepository>();
+builder.Services.AddScoped<IJobQueueService, JobQueueService>();
 
 var app = builder.Build();
 
@@ -54,6 +68,9 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowReactApp");
+
+// Map controllers
+app.MapControllers();
 
 // API Endpoints
 app.MapGet("/api/health", () => new { Status = "Healthy", Timestamp = DateTime.UtcNow });
