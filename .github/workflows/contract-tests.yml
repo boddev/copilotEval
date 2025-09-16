@@ -77,7 +77,7 @@ jobs:
         npx redocly build-docs openapi/openapi.yaml --output=openapi-docs.html
         
     - name: Upload OpenAPI documentation
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: openapi-documentation
         path: backend/openapi-docs.html
