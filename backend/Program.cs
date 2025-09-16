@@ -47,6 +47,10 @@ builder.Services.AddScoped<ICopilotService, CopilotService>();
 builder.Services.AddScoped<GraphSearchService>();
 builder.Services.AddScoped<IJobRepository, JobRepository>();
 builder.Services.AddScoped<IJobQueueService, JobQueueService>();
+builder.Services.AddScoped<IExecutionService, ExecutionService>();
+
+// Register background services
+builder.Services.AddHostedService<JobProcessor>();
 
 var app = builder.Build();
 

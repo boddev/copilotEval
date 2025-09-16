@@ -1,0 +1,53 @@
+{
+  "servicebus": {
+    "connectionString": "InMemory",
+    "queueName": "job-messages",
+    "deadLetterQueueName": "job-messages/$DeadLetterQueue",
+    "retryPolicy": {
+      "maxRetries": 3,
+      "backoffMultiplier": 2.0,
+      "maxBackoffDuration": "00:05:00",
+      "initialBackoffDuration": "00:00:30"
+    },
+    "processorOptions": {
+      "maxConcurrentCalls": 5,
+      "prefetchCount": 10,
+      "autoCompleteMessages": false,
+      "maxAutoLockRenewalDuration": "00:10:00",
+      "receiveMode": "PeekLock"
+    },
+    "deadLetterRules": [
+      {
+        "reason": "DESERIALIZATION_FAILED",
+        "action": "DeadLetter",
+        "description": "Message cannot be deserialized to JobMessage"
+      },
+      {
+        "reason": "MAX_RETRIES_EXCEEDED",
+        "action": "DeadLetter", 
+        "description": "Message has exceeded maximum retry attempts"
+      },
+      {
+        "reason": "NON_RETRYABLE_ERROR",
+        "action": "DeadLetter",
+        "description": "Error type indicates operation should not be retried"
+      }
+    ]
+  },
+  "blobStorage": {
+    "connectionString": "InMemory",
+    "containerName": "job-results",
+    "retention": {
+      "defaultDays": 30,
+      "maxDays": 365
+    },
+    "artifacts": {
+      "maxSizeBytes": 104857600,
+      "allowedContentTypes": [
+        "application/json",
+        "text/csv",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ]
+    }
+  }
+}
