@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "dev"
+    },
+    "namePrefix": {
+      "value": "copiloteval"
+    },
+    "enableMonitoring": {
+      "value": false
+    },
+    "sqlConfig": {
+      "value": {
+        "administratorLogin": "copilotadmin",
+        "administratorLoginPassword": "",
+        "databaseName": "copiloteval-dev",
+        "skuName": "S1",
+        "maxSizeBytes": 21474836480
+      }
+    },
+    "storageConfig": {
+      "value": {
+        "skuName": "Standard_LRS",
+        "containers": [
+          "job-data",
+          "results",
+          "uploads",
+          "large-payloads"
+        ]
+      }
+    },
+    "serviceBusConfig": {
+      "value": {
+        "skuName": "Basic",
+        "queues": [
+          {
+            "name": "job-messages",
+            "maxDeliveryCount": 10,
+            "lockDurationInSeconds": 300,
+            "duplicateDetectionTimeWindow": "PT10M",
+            "deadLetteringOnMessageExpiration": true,
+            "enableBatchedOperations": true,
+            "enablePartitioning": false,
+            "maxSizeInMegabytes": 1024
+          },
+          {
+            "name": "job-results",
+            "maxDeliveryCount": 5,
+            "lockDurationInSeconds": 60,
+            "duplicateDetectionTimeWindow": "PT5M",
+            "deadLetteringOnMessageExpiration": true,
+            "enableBatchedOperations": true,
+            "enablePartitioning": false,
+            "maxSizeInMegabytes": 512
+          }
+        ]
+      }
+    },
+    "functionAppConfig": {
+      "value": {
+        "skuName": "Y1",
+        "skuTier": "Dynamic",
+        "runtime": "dotnet",
+        "runtimeVersion": "8"
+      }
+    },
+    "tags": {
+      "value": {
+        "Environment": "dev",
+        "Application": "CopilotEval",
+        "Owner": "DevOps",
+        "Purpose": "Development and testing"
+      }
+    }
+  }
+}

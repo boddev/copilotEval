@@ -1,0 +1,80 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "prod"
+    },
+    "namePrefix": {
+      "value": "copiloteval"
+    },
+    "enableMonitoring": {
+      "value": true
+    },
+    "sqlConfig": {
+      "value": {
+        "administratorLogin": "copilotadmin",
+        "administratorLoginPassword": "",
+        "databaseName": "copiloteval-prod",
+        "skuName": "S2",
+        "maxSizeBytes": 107374182400
+      }
+    },
+    "storageConfig": {
+      "value": {
+        "skuName": "Standard_GRS",
+        "containers": [
+          "job-data",
+          "results",
+          "uploads",
+          "large-payloads"
+        ]
+      }
+    },
+    "serviceBusConfig": {
+      "value": {
+        "skuName": "Standard",
+        "queues": [
+          {
+            "name": "job-messages",
+            "maxDeliveryCount": 10,
+            "lockDurationInSeconds": 300,
+            "duplicateDetectionTimeWindow": "PT10M",
+            "deadLetteringOnMessageExpiration": true,
+            "enableBatchedOperations": true,
+            "enablePartitioning": true,
+            "maxSizeInMegabytes": 5120
+          },
+          {
+            "name": "job-results",
+            "maxDeliveryCount": 5,
+            "lockDurationInSeconds": 60,
+            "duplicateDetectionTimeWindow": "PT5M",
+            "deadLetteringOnMessageExpiration": true,
+            "enableBatchedOperations": true,
+            "enablePartitioning": true,
+            "maxSizeInMegabytes": 2048
+          }
+        ]
+      }
+    },
+    "functionAppConfig": {
+      "value": {
+        "skuName": "EP1",
+        "skuTier": "ElasticPremium",
+        "runtime": "dotnet",
+        "runtimeVersion": "8"
+      }
+    },
+    "tags": {
+      "value": {
+        "Environment": "prod",
+        "Application": "CopilotEval",
+        "Owner": "DevOps",
+        "Purpose": "Production workload",
+        "BusinessCriticality": "High",
+        "DataClassification": "Internal"
+      }
+    }
+  }
+}
