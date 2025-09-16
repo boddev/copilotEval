@@ -7,7 +7,8 @@ using CopilotEvalApi.Models;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddOpenApi();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 // Configure logging
 builder.Logging.ClearProviders();
@@ -42,7 +43,8 @@ logger.LogInformation("🚀 Copilot Evaluation API starting up...");
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
 // Only use HTTPS redirection in production

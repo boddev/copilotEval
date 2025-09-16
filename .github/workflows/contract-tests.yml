@@ -1,0 +1,83 @@
+name: API Contract Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/openapi/**'
+      - 'backend/docs/sample-payloads/**'
+      - 'backend/Models/**'
+      - 'backend/scripts/contract-tests.sh'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/openapi/**'
+      - 'backend/docs/sample-payloads/**'
+      - 'backend/Models/**'
+      - 'backend/scripts/contract-tests.sh'
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install validation tools
+      run: |
+        npm install -g swagger-cli @redocly/cli ajv-cli
+        
+    - name: Make contract test script executable
+      run: chmod +x backend/scripts/contract-tests.sh
+      
+    - name: Run contract tests
+      run: |
+        cd backend
+        ./scripts/contract-tests.sh
+        
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: contract-test-results
+        path: backend/test-results/
+        if-no-files-found: ignore
+
+  validate-openapi:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install OpenAPI tools
+      run: |
+        npm install -g @redocly/cli swagger-cli
+        
+    - name: Validate OpenAPI specification
+      run: |
+        cd backend
+        swagger-cli validate openapi/openapi.yaml
+        redocly lint openapi/openapi.yaml
+        
+    - name: Generate OpenAPI documentation
+      run: |
+        cd backend
+        npx redocly build-docs openapi/openapi.yaml --output=openapi-docs.html
+        
+    - name: Upload OpenAPI documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: openapi-documentation
+        path: backend/openapi-docs.html
