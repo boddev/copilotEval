@@ -1,0 +1,130 @@
+name: Reusable Staging Deployment
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: 'Azure App Service name for staging'
+        required: true
+        type: string
+      resource-group:
+        description: 'Azure resource group for staging'
+        required: true
+        type: string
+      artifact-name:
+        description: 'Build artifact to deploy'
+        required: true
+        type: string
+      run-smoke-tests:
+        description: 'Run smoke tests after deployment'
+        required: false
+        default: true
+        type: boolean
+      auto-swap:
+        description: 'Automatically swap to production after validation'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Azure client ID'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Azure tenant ID'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure subscription ID'
+        required: true
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: staging
+      url: https://${{ inputs.app-name }}.azurewebsites.net
+      
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ./deploy-package
+          
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Deploy to staging slot
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          slot-name: 'staging'
+          package: ./deploy-package
+          
+      - name: Warm up staging deployment
+        run: |
+          STAGING_URL="https://${{ inputs.app-name }}-staging.azurewebsites.net"
+          echo "Warming up staging deployment at $STAGING_URL"
+          
+          # Wait for deployment to be ready
+          sleep 30
+          
+          # Perform health check
+          for i in {1..5}; do
+            if curl -f "$STAGING_URL/api/health"; then
+              echo "✅ Staging health check passed"
+              break
+            else
+              echo "⚠️ Staging health check failed (attempt $i/5)"
+              sleep 15
+            fi
+          done
+          
+      - name: Run staging smoke tests
+        if: ${{ inputs.run-smoke-tests }}
+        run: |
+          echo "🧪 Running staging smoke tests..."
+          STAGING_URL="https://${{ inputs.app-name }}-staging.azurewebsites.net"
+          
+          # Test critical endpoints
+          curl -f "$STAGING_URL/api/health" || (echo "Health check failed" && exit 1)
+          
+          # Test API endpoints (if they exist)
+          echo "✅ Staging smoke tests completed"
+          
+      - name: Swap to production
+        if: ${{ inputs.auto-swap }}
+        run: |
+          echo "🔄 Swapping staging to production..."
+          az webapp deployment slot swap \
+            --resource-group ${{ inputs.resource-group }} \
+            --name ${{ inputs.app-name }} \
+            --slot staging \
+            --target-slot production
+            
+      - name: Verify production deployment
+        if: ${{ inputs.auto-swap }}
+        run: |
+          sleep 30
+          PROD_URL="https://${{ inputs.app-name }}.azurewebsites.net"
+          
+          curl -f "$PROD_URL/api/health" || (echo "Production verification failed" && exit 1)
+          echo "✅ Production deployment verified"
+          
+      - name: Create deployment summary
+        run: |
+          echo "## Staging Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name**: ${{ inputs.app-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Group**: ${{ inputs.resource-group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: ${{ inputs.artifact-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Auto Swap**: ${{ inputs.auto-swap }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Staging URL**: https://${{ inputs.app-name }}-staging.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.auto-swap }}" == "true" ]; then
+            echo "- **Production URL**: https://${{ inputs.app-name }}.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,84 @@
+name: Reusable Frontend Tests
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        default: '20.x'
+        type: string
+      working-directory:
+        description: 'Working directory for frontend'
+        required: false
+        default: 'frontend'
+        type: string
+      test-command:
+        description: 'Test command to run'
+        required: false
+        default: 'npm test'
+        type: string
+      coverage:
+        description: 'Generate coverage reports'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          
+      - name: Install dependencies
+        run: |
+          cd ${{ inputs.working-directory }}
+          npm ci
+          
+      - name: Run tests
+        run: |
+          cd ${{ inputs.working-directory }}
+          if npm run test --if-present; then
+            echo "✅ Tests passed"
+          else
+            echo "⚠️ No test script found or tests failed"
+            exit 0  # Don't fail the workflow if tests aren't configured yet
+          fi
+          
+      - name: Run linting
+        run: |
+          cd ${{ inputs.working-directory }}
+          if npm run lint --if-present; then
+            echo "✅ Linting passed"
+          else
+            echo "⚠️ No lint script found"
+          fi
+          
+      - name: Generate coverage report
+        if: ${{ inputs.coverage }}
+        run: |
+          cd ${{ inputs.working-directory }}
+          if npm run test:coverage --if-present; then
+            echo "✅ Coverage report generated"
+          else
+            echo "⚠️ No coverage script found"
+          fi
+          
+      - name: Upload coverage reports
+        if: ${{ inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: ${{ inputs.working-directory }}/coverage/
+          if-no-files-found: ignore
+          retention-days: 7

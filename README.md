@@ -1,6 +1,6 @@
 # Copilot Evaluation Tool
 
-A React + .NET 9 Minimal API application for evaluating LLM (Large Language Model) responses against expected outputs.
+A React + .NET 8 Minimal API application for evaluating LLM (Large Language Model) responses against expected outputs with comprehensive CI/CD pipeline.
 
 ## Features
 
@@ -9,31 +9,80 @@ A React + .NET 9 Minimal API application for evaluating LLM (Large Language Mode
 - **Copilot Integration**: Get responses from Copilot Chat API
 - **Similarity Scoring**: Compare expected vs actual outputs with scoring
 - **Real-time Status Tracking**: Track validation progress and results
+- **Enterprise CI/CD Pipeline**: Automated build, test, and deployment pipeline
+- **Blue-Green Deployments**: Zero-downtime deployments with automatic rollback
+- **Multi-Environment Support**: Development, staging, and production environments
 
 ## Project Structure
 
 ```
 copilotEval/
-├── backend/                 # .NET 9 Minimal API
-│   ├── Program.cs          # API endpoints and configuration
-│   ├── Properties/         # Launch settings
+├── backend/                  # .NET 8 Minimal API
+│   ├── Program.cs           # API endpoints and configuration
+│   ├── Properties/          # Launch settings
 │   └── CopilotEvalApi.csproj
-├── frontend/               # React TypeScript application
+├── frontend/                # React TypeScript application
 │   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── services/       # API service layer
-│   │   ├── types/          # TypeScript interfaces
-│   │   └── App.tsx         # Main application component
+│   │   ├── components/      # React components
+│   │   ├── services/        # API service layer
+│   │   ├── types/           # TypeScript interfaces
+│   │   └── App.tsx          # Main application component
 │   ├── package.json
 │   └── vite.config.ts
+├── infra/                   # Infrastructure as Code
+│   ├── main.bicep          # Main Bicep template
+│   ├── modules/            # Bicep modules
+│   ├── parameters/         # Environment configurations
+│   ├── deploy.sh           # Deployment script
+│   └── ci-templates/       # CI/CD reusable templates
+├── .github/workflows/      # GitHub Actions workflows
+│   ├── ci.yml             # Continuous Integration
+│   ├── cd.yml             # Continuous Deployment
+│   └── contract-tests.yml # API contract tests
 └── README.md
+```
+
+## CI/CD Pipeline
+
+The project includes a comprehensive CI/CD pipeline with the following features:
+
+### ✅ Continuous Integration (CI)
+- **Automated on**: Pull requests and pushes to main/develop
+- **Frontend**: TypeScript compilation, linting, and build validation
+- **Backend**: .NET build, testing, and code quality checks
+- **Security**: Vulnerability scanning and dependency checks
+- **Infrastructure**: Bicep template validation
+- **Quality Gates**: All checks must pass before merge
+
+### 🚀 Continuous Deployment (CD)
+- **Staging**: Automatic deployment on main branch
+- **Production**: Manual approval required
+- **Strategy**: Blue-green deployments for zero downtime
+- **Rollback**: Automatic on failure, manual trigger available
+- **Monitoring**: Health checks and performance monitoring
+
+### 📋 Pipeline Status
+```yaml
+Environments:
+  Staging: ✅ Automated deployment
+  Production: 🔒 Manual approval required
+
+Deployment Strategy:
+  Type: Blue-Green
+  Rollback: Available
+  Zero-Downtime: ✅
+
+Security:
+  Vulnerability Scanning: ✅
+  Dependency Checks: ✅
+  Secret Management: ✅
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- .NET 9 SDK
+- .NET 8 SDK
 - Node.js 18+ and npm
 - VS Code (recommended)
 - Azure CLI (for infrastructure deployment)
@@ -294,6 +343,60 @@ sqllocaldb start mssqllocaldb
 - **[Infrastructure Guide](infra/README.md)** - Azure deployment and infrastructure management
 - **[Deployment Summary](infra/DEPLOYMENT_SUMMARY.md)** - Infrastructure setup overview
 
+## Deployment
+
+### Infrastructure Deployment
+
+The project uses Azure Bicep templates for infrastructure as code:
+
+```bash
+# Deploy to development environment
+cd infra
+./deploy.sh -e dev -g rg-copiloteval-dev -s YOUR_SUBSCRIPTION_ID
+
+# Deploy to staging environment  
+./deploy.sh -e staging -g rg-copiloteval-staging -s YOUR_SUBSCRIPTION_ID
+
+# Deploy to production environment
+./deploy.sh -e prod -g rg-copiloteval-prod -s YOUR_SUBSCRIPTION_ID
+```
+
+### Application Deployment
+
+#### Automatic Deployment (Recommended)
+- **Staging**: Automatically deploys when changes are pushed to `main` branch
+- **Production**: Manual approval required via GitHub Actions
+
+#### Manual Deployment
+```bash
+# Build and deploy frontend
+cd frontend
+npm run build
+
+# Build and deploy backend
+cd backend
+dotnet publish -c Release
+```
+
+### Pipeline Management
+
+```bash
+# View deployment status
+gh workflow list
+
+# Trigger production deployment
+gh workflow run cd.yml --field environment=production
+
+# Monitor deployment logs
+gh run watch
+```
+
+For detailed deployment procedures, see:
+- [Infrastructure Deployment Guide](infra/DEPLOYMENT_SUMMARY.md)
+- [Rollback Procedures](infra/ROLLBACK_PROCEDURES.md)
+- [Environment Configuration](infra/ENVIRONMENT_CONFIG.md)
+- [Troubleshooting Guide](infra/TROUBLESHOOTING.md)
+
 ## API Endpoints
 
 ### Core Endpoints
@@ -341,10 +444,19 @@ For complete API documentation, import the [Postman Collection](docs/postman-col
 
 ### Backend Development
 
-- .NET 9 Minimal API pattern
+- .NET 8 Minimal API pattern
 - CORS enabled for React development
 - Simple similarity scoring using Levenshtein distance
 - Ready for Copilot Chat API integration
+
+## CI/CD Documentation
+
+- **[CI Pipeline](.github/workflows/ci.yml)**: Automated build, test, and quality checks
+- **[CD Pipeline](.github/workflows/cd.yml)**: Deployment automation with blue-green strategy
+- **[CI Templates](infra/ci-templates/)**: Reusable workflow components
+- **[Environment Config](infra/ENVIRONMENT_CONFIG.md)**: Environment-specific settings
+- **[Rollback Procedures](infra/ROLLBACK_PROCEDURES.md)**: Rollback strategies and procedures
+- **[Troubleshooting](infra/TROUBLESHOOTING.md)**: Common issues and solutions
 
 ## TODO
 

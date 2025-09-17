@@ -1,0 +1,58 @@
+name: Reusable Node.js Setup
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        default: '20.x'
+        type: string
+      package-manager:
+        description: 'Package manager to use'
+        required: false
+        default: 'npm'
+        type: string
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      cache-dependency-path:
+        description: 'Path to lock file for caching'
+        required: false
+        default: ''
+        type: string
+      global-packages:
+        description: 'Global packages to install (comma-separated)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  setup-node:
+    name: Setup Node.js Environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.cache-dependency-path || format('{0}/package-lock.json', inputs.working-directory) }}
+          
+      - name: Install global packages
+        if: ${{ inputs.global-packages }}
+        run: |
+          IFS=',' read -ra PACKAGES <<< "${{ inputs.global-packages }}"
+          for package in "${PACKAGES[@]}"; do
+            echo "Installing global package: $package"
+            npm install -g "$package"
+          done
+          
+      - name: Display Node.js info
+        run: |
+          node --version
+          npm --version
+          echo "✅ Node.js environment setup complete"
