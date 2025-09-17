@@ -1,0 +1,40 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  },
+  "AllowedHosts": "*",
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "Domain": "",
+    "TenantId": "",
+    "ClientId": "",
+    "Audience": ""
+  },
+  "MicrosoftGraph": {
+    "BaseUrl": "https://graph.microsoft.com/v1.0",
+    "CopilotChatUrl": "https://graph.microsoft.com/beta/me/copilot/conversations",
+    "Scopes": [
+      "https://graph.microsoft.com/Sites.Read.All",
+      "https://graph.microsoft.com/Mail.Read",
+      "https://graph.microsoft.com/Files.Read.All",
+      "https://graph.microsoft.com/User.Read"
+    ]
+  },
+  "KeyVault": {
+    "VaultUrl": ""
+  },
+  "ConnectionStrings": {
+    "ServiceBus": "",
+    "ApplicationInsights": ""
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "https://localhost:3000",
+      "https://localhost:5173"
+    ]
+  }
+}
