@@ -1,0 +1,115 @@
+name: Reusable Azure Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: string
+      app-name:
+        description: 'Azure App Service name'
+        required: true
+        type: string
+      resource-group:
+        description: 'Azure resource group'
+        required: true
+        type: string
+      slot-name:
+        description: 'Deployment slot name'
+        required: false
+        default: 'staging'
+        type: string
+      artifact-name:
+        description: 'Build artifact to deploy'
+        required: true
+        type: string
+      use-blue-green:
+        description: 'Use blue-green deployment strategy'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Azure client ID'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Azure tenant ID'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure subscription ID'
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: ${{ inputs.environment }}
+      
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ./deploy-package
+          
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Deploy to staging slot
+        if: ${{ inputs.use-blue-green }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          slot-name: ${{ inputs.slot-name }}
+          package: ./deploy-package
+          
+      - name: Deploy directly to production
+        if: ${{ !inputs.use-blue-green }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          package: ./deploy-package
+          
+      - name: Warm up deployment
+        run: |
+          if [ "${{ inputs.use-blue-green }}" == "true" ]; then
+            HEALTH_URL="https://${{ inputs.app-name }}-${{ inputs.slot-name }}.azurewebsites.net/api/health"
+          else
+            HEALTH_URL="https://${{ inputs.app-name }}.azurewebsites.net/api/health"
+          fi
+          
+          echo "Warming up deployment at $HEALTH_URL"
+          sleep 30
+          
+          for i in {1..5}; do
+            if curl -f "$HEALTH_URL"; then
+              echo "✅ Health check passed"
+              break
+            else
+              echo "⚠️ Health check failed (attempt $i/5)"
+              sleep 10
+            fi
+          done
+          
+      - name: Swap to production
+        if: ${{ inputs.use-blue-green && inputs.slot-name != 'production' }}
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ inputs.resource-group }} \
+            --name ${{ inputs.app-name }} \
+            --slot ${{ inputs.slot-name }} \
+            --target-slot production
+            
+      - name: Verify production deployment
+        if: ${{ inputs.use-blue-green && inputs.slot-name != 'production' }}
+        run: |
+          sleep 30
+          curl -f "https://${{ inputs.app-name }}.azurewebsites.net/api/health" || (echo "Production verification failed" && exit 1)
+          echo "✅ Production deployment verified"

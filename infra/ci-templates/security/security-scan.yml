@@ -1,0 +1,52 @@
+name: Reusable Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      scan-type:
+        description: 'Type of scan to perform'
+        required: false
+        default: 'fs'
+        type: string
+      severity-threshold:
+        description: 'Severity threshold for failing the build'
+        required: false
+        default: 'HIGH'
+        type: string
+      upload-results:
+        description: 'Whether to upload scan results'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: ${{ inputs.scan-type }}
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: ${{ inputs.severity-threshold }}
+          
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: ${{ inputs.upload-results }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          
+      - name: Upload scan results as artifact
+        if: ${{ inputs.upload-results }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results-${{ github.run_id }}
+          path: 'trivy-results.sarif'
+          retention-days: 30
