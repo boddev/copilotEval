@@ -1,3 +1,12 @@
+# Test artifacts
+tests/*/bin/
+tests/*/obj/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/node_modules/
+load-tests/k6/*.json
+TestResults/
+
 # .NET
 backend/bin/
 backend/obj/
