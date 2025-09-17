@@ -42,6 +42,9 @@ param networkAcls object = {
   virtualNetworkRules: []
 }
 
+@description('Principal IDs that need access to Key Vault secrets (backend app, worker function)')
+param principalIds array = []
+
 // Key Vault resource
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
@@ -93,6 +96,51 @@ resource functionAppKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   properties: {
     value: 'func-key-${uniqueString(resourceGroup().id)}' // Generate a unique key for function app authentication
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+// RBAC role assignments for managed identities to access Key Vault secrets
+resource keyVaultSecretsUserRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in principalIds: {
+  name: guid(keyVault.id, principalId, 'Key Vault Secrets User')
+  scope: keyVault
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+// Additional secrets for Service Bus and other services
+resource serviceBusConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  name: 'servicebus-connection-string'
+  parent: keyVault
+  properties: {
+    value: 'placeholder-servicebus-connection' // This will be updated by the infrastructure deployment
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+resource sqlConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  name: 'sql-connection-string'
+  parent: keyVault
+  properties: {
+    value: 'placeholder-sql-connection' // This will be updated by the infrastructure deployment
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+resource azureAdClientSecretSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  name: 'azuread-client-secret'
+  parent: keyVault
+  properties: {
+    value: 'placeholder-client-secret' // This should be updated with the actual client secret
     attributes: {
       enabled: true
     }

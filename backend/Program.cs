@@ -10,8 +10,24 @@ using OpenTelemetry;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Azure.Identity;
+using Azure.Extensions.AspNetCore.Configuration.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure Azure Key Vault for production
+if (!builder.Environment.IsDevelopment())
+{
+    var keyVaultUrl = builder.Configuration["KeyVault:VaultUrl"];
+    if (!string.IsNullOrEmpty(keyVaultUrl))
+    {
+        // Use Managed Identity in production
+        var credential = new DefaultAzureCredential();
+        builder.Configuration.AddAzureKeyVault(new Uri(keyVaultUrl), credential);
+    }
+}
 
 // Add services to the container.
 builder.Services.AddEndpointsApiExplorer();
@@ -26,6 +42,46 @@ builder.Services.AddControllers()
 // Add Entity Framework with In-Memory database for development
 builder.Services.AddDbContext<JobDbContext>(options =>
     options.UseInMemoryDatabase("CopilotEvalDb"));
+
+// Configure Azure AD Authentication
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        var azureAdConfig = builder.Configuration.GetSection("AzureAd");
+        var tenantId = azureAdConfig["TenantId"];
+        var clientId = azureAdConfig["ClientId"];
+        var audience = azureAdConfig["Audience"] ?? clientId;
+
+        options.Authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = $"https://login.microsoftonline.com/{tenantId}/v2.0",
+            ValidateAudience = true,
+            ValidAudiences = new[] { audience, $"api://{audience}" },
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.FromMinutes(5)
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError("Authentication failed: {Error}", context.Exception.Message);
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogInformation("Token validated for user: {User}", context.Principal?.Identity?.Name ?? "Unknown");
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 // Configure logging
 builder.Logging.ClearProviders();
@@ -100,11 +156,15 @@ if (!string.IsNullOrEmpty(appInsightsConnectionString))
 // Add CORS
 builder.Services.AddCors(options =>
 {
+    var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+        ?? new[] { "http://localhost:3000", "http://localhost:3001", "http://localhost:5173" };
+    
     options.AddPolicy("AllowReactApp", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:3001", "http://localhost:5173")
+        policy.WithOrigins(corsOrigins)
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -142,6 +202,10 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowReactApp");
+
+// Add authentication and authorization
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Map controllers
 app.MapControllers();
@@ -283,7 +347,7 @@ app.MapGet("/api/copilot/agents", async (ICopilotService copilotService, string?
         logger.LogError("🔍 [Agents {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
         return Results.BadRequest(new { Error = ex.Message });
     }
-});
+}).RequireAuthorization();
 
 // Get External Knowledge Sources Endpoint
 app.MapGet("/api/copilot/knowledge-sources", async (GraphSearchService graphSearchService, string? accessToken, ILogger<Program> logger) =>
@@ -326,7 +390,7 @@ app.MapGet("/api/copilot/knowledge-sources", async (GraphSearchService graphSear
         logger.LogError("🔍 [KnowledgeSources {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
         return Results.BadRequest(new { Error = ex.Message });
     }
-});
+}).RequireAuthorization();
 
 // Enhanced Copilot Chat Endpoint
 app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, GraphSearchService graphSearchService, ChatRequest request, ILogger<Program> logger) =>
@@ -494,7 +558,7 @@ app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, GraphSea
             Attributions: null
         ).ToString());
     }
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/similarity/score", async (ICopilotService copilotService, GraphSearchService graphSearchService, SimilarityRequest request, ILogger<Program> logger) =>
 {
@@ -640,7 +704,7 @@ Focus on semantic meaning rather than exact word matching. Start your response w
             Error: ex.Message
         ));
     }
-});
+}).RequireAuthorization();
 
 app.Run();
 
