@@ -3,16 +3,16 @@
     "LogLevel": {
       "Default": "Information",
       "Microsoft.AspNetCore": "Warning",
-      "Azure": "Warning"
+      "Microsoft.Hosting.Lifetime": "Information"
     }
   },
+  "AllowedHosts": "*",
   "AzureAd": {
     "Instance": "https://login.microsoftonline.com/",
-    "Domain": "your-domain.onmicrosoft.com",
-    "TenantId": "YOUR_TENANT_ID_HERE",
-    "ClientId": "YOUR_APPLICATION_CLIENT_ID_HERE",
-    "ClientSecret": "YOUR_CLIENT_SECRET_HERE",
-    "Audience": "YOUR_APPLICATION_CLIENT_ID_HERE"
+    "Domain": "",
+    "TenantId": "",
+    "ClientId": "",
+    "Audience": ""
   },
   "MicrosoftGraph": {
     "BaseUrl": "https://graph.microsoft.com/v1.0",
@@ -25,17 +25,16 @@
     ]
   },
   "KeyVault": {
-    "VaultUrl": "https://your-keyvault.vault.azure.net/"
+    "VaultUrl": ""
   },
   "ConnectionStrings": {
-    "ServiceBus": "InMemory",
+    "ServiceBus": "",
     "ApplicationInsights": ""
   },
   "Cors": {
     "AllowedOrigins": [
-      "http://localhost:3000",
-      "http://localhost:3001", 
-      "http://localhost:5173"
+      "https://localhost:3000",
+      "https://localhost:5173"
     ]
   }
 }

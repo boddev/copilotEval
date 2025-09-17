@@ -4,6 +4,7 @@ using CopilotEvalApi.Models;
 using CopilotEvalApi.Repositories;
 using CopilotEvalApi.Observability;
 using System.Diagnostics;
+using Azure.Identity;
 
 namespace CopilotEvalApi.Services;
 
@@ -49,8 +50,20 @@ public class JobProcessor : BackgroundService
 
         try
         {
-            // Create Service Bus client and processor
-            _serviceBusClient = new ServiceBusClient(connectionString);
+            // Create Service Bus client using managed identity when available, otherwise connection string
+            if (connectionString.StartsWith("https://") || connectionString.EndsWith(".servicebus.windows.net"))
+            {
+                // Use managed identity for production environments
+                _logger.LogInformation("🔐 Using managed identity for Service Bus authentication");
+                var credential = new DefaultAzureCredential();
+                _serviceBusClient = new ServiceBusClient(connectionString, credential);
+            }
+            else
+            {
+                // Use connection string for development
+                _logger.LogInformation("🔑 Using connection string for Service Bus authentication");
+                _serviceBusClient = new ServiceBusClient(connectionString);
+            }
             
             var processorOptions = new ServiceBusProcessorOptions
             {
