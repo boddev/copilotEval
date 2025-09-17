@@ -5,6 +5,11 @@ using System.Text.Json.Serialization;
 using CopilotEvalApi.Services;
 using CopilotEvalApi.Models;
 using CopilotEvalApi.Repositories;
+using CopilotEvalApi.Observability;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +31,71 @@ builder.Services.AddDbContext<JobDbContext>(options =>
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
+
+// Configure OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService("copiloteval-backend", 
+                   serviceVersion: "1.0.0",
+                   serviceInstanceId: Environment.MachineName))
+    .WithTracing(tracing => tracing
+        .AddSource(Telemetry.ActivitySource.Name)
+        .AddSource(WorkerTelemetry.ActivitySource.Name)
+        .AddAspNetCoreInstrumentation(options =>
+        {
+            options.RecordException = true;
+            options.EnrichWithHttpRequest = (activity, request) =>
+            {
+                activity.SetTag("http.request.body.size", request.ContentLength);
+                activity.SetTag("user_agent", request.Headers.UserAgent.ToString());
+            };
+            options.EnrichWithHttpResponse = (activity, response) =>
+            {
+                activity.SetTag("http.response.body.size", response.ContentLength);
+            };
+        })
+        .AddHttpClientInstrumentation(options =>
+        {
+            options.RecordException = true;
+            options.EnrichWithHttpRequestMessage = (activity, request) =>
+            {
+                activity.SetTag("http.request.body.size", request.Content?.Headers?.ContentLength);
+            };
+            options.EnrichWithHttpResponseMessage = (activity, response) =>
+            {
+                activity.SetTag("http.response.body.size", response.Content?.Headers?.ContentLength);
+            };
+        })
+        .AddEntityFrameworkCoreInstrumentation(options =>
+        {
+            options.SetDbStatementForText = true;
+            options.EnrichWithIDbCommand = (activity, command) =>
+            {
+                activity.SetTag("db.command.timeout", command.CommandTimeout);
+            };
+        }))
+    .WithMetrics(metrics => metrics
+        .AddMeter(Telemetry.Meter.Name)
+        .AddMeter(WorkerTelemetry.Meter.Name)
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation());
+
+// Configure Application Insights if connection string is available
+var appInsightsConnectionString = builder.Configuration.GetConnectionString("ApplicationInsights");
+if (!string.IsNullOrEmpty(appInsightsConnectionString))
+{
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("https://dc.applicationinsights.azure.com/v2/track");
+            }))
+        .WithMetrics(metrics => metrics
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("https://dc.applicationinsights.azure.com/v2/track");
+            }));
+}
 
 // Add CORS
 builder.Services.AddCors(options =>
