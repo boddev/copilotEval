@@ -1,0 +1,42 @@
+{
+  "job_id": "job_abc123def456",
+  "message_type": "job_created",
+  "created_at": "2024-01-15T10:30:00Z",
+  "correlation_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "retry_count": 0,
+  "payload": {
+    "job": {
+      "id": "job_abc123def456",
+      "name": "Edgar Filing Evaluation",
+      "description": "Evaluate Copilot responses against Edgar filing data",
+      "type": "bulk_evaluation",
+      "status": "pending",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z",
+      "completed_at": null,
+      "estimated_completion": "2024-01-15T11:00:00Z",
+      "progress": {
+        "total_items": 0,
+        "completed_items": 0,
+        "percentage": 0.0
+      },
+      "configuration": {
+        "data_source": "edgar-validation-data.csv",
+        "prompt_template": "Based on the following financial data: {context}, provide an analysis.",
+        "evaluation_criteria": {
+          "similarity_threshold": 0.8,
+          "use_semantic_scoring": true,
+          "custom_evaluators": ["financial_accuracy"]
+        },
+        "agent_configuration": {
+          "selected_agent_id": null,
+          "additional_instructions": "Focus on financial accuracy and regulatory compliance",
+          "knowledge_source": "edgar_filings"
+        }
+      },
+      "error_details": null
+    },
+    "priority": "normal"
+  },
+  "blob_references": []
+}

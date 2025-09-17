@@ -839,3 +839,6 @@ static (double score, string reasoning, string differences) ParseEvaluationRespo
         return (0.5, $"Error parsing response: {ex.Message}", "Unable to determine differences due to parsing error");
     }
 }
+
+// Make Program class accessible to tests
+public partial class Program { }
