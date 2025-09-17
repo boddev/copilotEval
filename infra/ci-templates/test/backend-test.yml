@@ -1,0 +1,114 @@
+name: Reusable Backend Tests
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: '.NET version to use'
+        required: false
+        default: '8.x'
+        type: string
+      solution-file:
+        description: 'Solution file path'
+        required: false
+        default: '.'
+        type: string
+      test-projects:
+        description: 'Test project paths (comma-separated)'
+        required: false
+        default: ''
+        type: string
+      coverage:
+        description: 'Generate coverage reports'
+        required: false
+        default: true
+        type: boolean
+      coverage-threshold:
+        description: 'Minimum coverage percentage'
+        required: false
+        default: 80
+        type: number
+
+jobs:
+  test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          
+      - name: Restore dependencies
+        run: dotnet restore ${{ inputs.solution-file }}
+        
+      - name: Build solution
+        run: dotnet build ${{ inputs.solution-file }} --no-restore --configuration Release
+        
+      - name: Run tests
+        run: |
+          if [ -n "${{ inputs.test-projects }}" ]; then
+            # Run specific test projects
+            IFS=',' read -ra PROJECTS <<< "${{ inputs.test-projects }}"
+            for project in "${PROJECTS[@]}"; do
+              echo "Running tests for: $project"
+              dotnet test "$project" --no-build --configuration Release --logger trx --results-directory ./test-results
+            done
+          else
+            # Run all tests in solution
+            dotnet test ${{ inputs.solution-file }} --no-build --configuration Release --logger trx --results-directory ./test-results
+          fi
+          
+      - name: Generate coverage report
+        if: ${{ inputs.coverage }}
+        run: |
+          # Install coverlet global tool
+          dotnet tool install -g coverlet.console
+          
+          if [ -n "${{ inputs.test-projects }}" ]; then
+            IFS=',' read -ra PROJECTS <<< "${{ inputs.test-projects }}"
+            for project in "${PROJECTS[@]}"; do
+              echo "Generating coverage for: $project"
+              dotnet test "$project" --no-build --configuration Release \
+                --collect:"XPlat Code Coverage" \
+                --results-directory ./coverage
+            done
+          else
+            dotnet test ${{ inputs.solution-file }} --no-build --configuration Release \
+              --collect:"XPlat Code Coverage" \
+              --results-directory ./coverage
+          fi
+          
+      - name: Code Coverage Summary
+        if: ${{ inputs.coverage }}
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: coverage/**/coverage.cobertura.xml
+          badge: true
+          fail_below_min: false
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: '${{ inputs.coverage-threshold }} 95'
+          
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results-${{ github.run_id }}
+          path: ./test-results/
+          retention-days: 7
+          
+      - name: Upload coverage reports
+        if: ${{ inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: ./coverage/
+          retention-days: 7

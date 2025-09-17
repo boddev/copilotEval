@@ -1,0 +1,55 @@
+name: Reusable .NET Setup
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: '.NET version to use'
+        required: false
+        default: '8.x'
+        type: string
+      include-nuget-cache:
+        description: 'Enable NuGet package caching'
+        required: false
+        default: true
+        type: boolean
+      global-tools:
+        description: 'Global tools to install (comma-separated)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  setup-dotnet:
+    name: Setup .NET Environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          
+      - name: Cache NuGet packages
+        if: ${{ inputs.include-nuget-cache }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/*.vbproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+            
+      - name: Install global tools
+        if: ${{ inputs.global-tools }}
+        run: |
+          IFS=',' read -ra TOOLS <<< "${{ inputs.global-tools }}"
+          for tool in "${TOOLS[@]}"; do
+            echo "Installing global tool: $tool"
+            dotnet tool install -g "$tool"
+          done
+          
+      - name: Display .NET info
+        run: |
+          dotnet --version
+          dotnet --list-sdks
+          echo "✅ .NET environment setup complete"

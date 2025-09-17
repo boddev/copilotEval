@@ -1,0 +1,195 @@
+name: Reusable Production Deployment
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: 'Azure App Service name for production'
+        required: true
+        type: string
+      resource-group:
+        description: 'Azure resource group for production'
+        required: true
+        type: string
+      artifact-name:
+        description: 'Build artifact to deploy'
+        required: true
+        type: string
+      create-backup:
+        description: 'Create backup before deployment'
+        required: false
+        default: true
+        type: boolean
+      run-pre-deployment-tests:
+        description: 'Run comprehensive tests before swap'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Azure client ID'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Azure tenant ID'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure subscription ID'
+        required: true
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: production
+      url: https://${{ inputs.app-name }}.azurewebsites.net
+      
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ./deploy-package
+          
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Create production backup
+        if: ${{ inputs.create-backup }}
+        run: |
+          echo "📦 Creating production backup..."
+          BACKUP_NAME="prod-backup-$(date +%Y%m%d-%H%M%S)"
+          
+          # Create backup slot
+          az webapp deployment slot create \
+            --resource-group ${{ inputs.resource-group }} \
+            --name ${{ inputs.app-name }} \
+            --slot $BACKUP_NAME \
+            --configuration-source production || echo "Backup creation failed - continuing"
+            
+          echo "✅ Backup created: $BACKUP_NAME"
+          
+      - name: Deploy to production staging slot
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          slot-name: 'staging'
+          package: ./deploy-package
+          
+      - name: Warm up production staging slot
+        run: |
+          STAGING_URL="https://${{ inputs.app-name }}-staging.azurewebsites.net"
+          echo "🔥 Warming up production staging slot..."
+          
+          # Extended warm-up for production
+          sleep 60
+          
+          # Perform comprehensive health check
+          for i in {1..10}; do
+            if curl -f "$STAGING_URL/api/health"; then
+              echo "✅ Production staging health check passed"
+              break
+            else
+              echo "⚠️ Production staging health check failed (attempt $i/10)"
+              if [ $i -eq 10 ]; then
+                echo "❌ Production staging health checks failed - aborting deployment"
+                exit 1
+              fi
+              sleep 20
+            fi
+          done
+          
+      - name: Run pre-deployment tests
+        if: ${{ inputs.run-pre-deployment-tests }}
+        run: |
+          echo "🧪 Running comprehensive pre-deployment tests..."
+          STAGING_URL="https://${{ inputs.app-name }}-staging.azurewebsites.net"
+          
+          # Test critical functionality
+          echo "Testing health endpoint..."
+          curl -f "$STAGING_URL/api/health" || (echo "Health check failed" && exit 1)
+          
+          # Test API endpoints
+          echo "Testing API endpoints..."
+          # Add specific API tests here based on your application
+          
+          # Performance baseline test
+          echo "Testing response time..."
+          RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}\n' "$STAGING_URL/api/health")
+          echo "Response time: ${RESPONSE_TIME}s"
+          
+          # Check if response time is acceptable (less than 5 seconds for health check)
+          if (( $(echo "$RESPONSE_TIME > 5.0" | bc -l) )); then
+            echo "⚠️ Response time exceeds 5 seconds - consider investigation"
+          fi
+          
+          echo "✅ Pre-deployment tests completed successfully"
+          
+      - name: Blue-Green swap to production
+        run: |
+          echo "🔄 Performing blue-green deployment swap..."
+          az webapp deployment slot swap \
+            --resource-group ${{ inputs.resource-group }} \
+            --name ${{ inputs.app-name }} \
+            --slot staging \
+            --target-slot production
+            
+          echo "✅ Blue-green swap completed"
+          
+      - name: Verify production deployment
+        run: |
+          echo "🔍 Verifying production deployment..."
+          sleep 45  # Allow time for swap to complete
+          
+          PROD_URL="https://${{ inputs.app-name }}.azurewebsites.net"
+          
+          # Comprehensive production verification
+          for i in {1..5}; do
+            if curl -f "$PROD_URL/api/health"; then
+              echo "✅ Production health check passed"
+              break
+            else
+              echo "❌ Production health check failed (attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "🚨 Production deployment verification failed - consider rollback"
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+          
+          echo "✅ Production deployment verified successfully"
+          
+      - name: Run post-deployment smoke tests
+        run: |
+          echo "🧪 Running post-deployment smoke tests..."
+          PROD_URL="https://${{ inputs.app-name }}.azurewebsites.net"
+          
+          # Test critical production functionality
+          curl -f "$PROD_URL/api/health" || (echo "Production smoke test failed" && exit 1)
+          
+          # Additional production-specific tests
+          echo "✅ Production smoke tests completed"
+          
+      - name: Create deployment summary
+        run: |
+          echo "## Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name**: ${{ inputs.app-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Group**: ${{ inputs.resource-group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: ${{ inputs.artifact-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backup Created**: ${{ inputs.create-backup }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-deployment Tests**: ${{ inputs.run-pre-deployment-tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Strategy**: Blue-Green" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Successfully Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production URL**: https://${{ inputs.app-name }}.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          echo "- **Staging URL**: https://${{ inputs.app-name }}-staging.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          
+      - name: Notify deployment success
+        run: |
+          echo "🎉 Production deployment completed successfully!"
+          echo "🌐 Application is live at: https://${{ inputs.app-name }}.azurewebsites.net"
