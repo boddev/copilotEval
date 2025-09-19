@@ -36,6 +36,58 @@ public class CopilotService : ICopilotService
         _graphOptions = configuration.GetSection("MicrosoftGraph").Get<MicrosoftGraphOptions>() ?? new MicrosoftGraphOptions();
     }
 
+    // Helper to resolve tenant id with sensible fallbacks
+    private string ResolveTenantId()
+    {
+        var tenant = _azureAdOptions.TenantId?.Trim() ?? string.Empty;
+
+        // Detect common placeholder values used in the repo
+        var isPlaceholder = string.IsNullOrWhiteSpace(tenant)
+                            || tenant.IndexOf("YOUR_TENANT", StringComparison.OrdinalIgnoreCase) >= 0
+                            || tenant.IndexOf("YOUR_TENANT_ID", StringComparison.OrdinalIgnoreCase) >= 0
+                            || tenant.IndexOf("YOUR-" , StringComparison.OrdinalIgnoreCase) >= 0;
+
+        if (!isPlaceholder)
+            return tenant;
+
+        // Try environment variable next
+        var envTenant = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
+        if (!string.IsNullOrWhiteSpace(envTenant))
+        {
+            _logger.LogWarning("AzureAd:TenantId is not set in configuration or is a placeholder. Using AZURE_TENANT_ID from environment variable.");
+            return envTenant.Trim();
+        }
+
+        // Last resort: fall back to 'common' to allow multi-tenant sign-in (useful for development), but log guidance
+        _logger.LogWarning("AzureAd:TenantId is not set and AZURE_TENANT_ID environment variable is not present. Falling back to 'common'. Set AzureAd:TenantId or AZURE_TENANT_ID to your tenant id to restrict to a single tenant.");
+        return "common";
+    }
+
+    // Helper to resolve client id with sensible fallbacks
+    private string ResolveClientId()
+    {
+        var clientId = _azureAdOptions.ClientId?.Trim() ?? string.Empty;
+
+        var isPlaceholder = string.IsNullOrWhiteSpace(clientId)
+                            || clientId.IndexOf("YOUR_APPLICATION_CLIENT_ID", StringComparison.OrdinalIgnoreCase) >= 0
+                            || clientId.IndexOf("YOUR_CLIENT_ID", StringComparison.OrdinalIgnoreCase) >= 0
+                            || clientId.IndexOf("YOUR-", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        if (!isPlaceholder)
+            return clientId;
+
+        var envClient = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID");
+        if (!string.IsNullOrWhiteSpace(envClient))
+        {
+            _logger.LogWarning("AzureAd:ClientId is not set in configuration or is a placeholder. Using AZURE_CLIENT_ID from environment variable.");
+            return envClient.Trim();
+        }
+
+        // Emit error-level log since client id is required to build a valid OAuth URL
+        _logger.LogError("AzureAd:ClientId is not set and AZURE_CLIENT_ID environment variable is not present. Please set AzureAd:ClientId in configuration or AZURE_CLIENT_ID environment variable.");
+        return clientId; // return whatever was present (likely placeholder) to keep current behavior
+    }
+
     public async Task<string> CreateConversationAsync(string accessToken)
     {
         try
@@ -236,13 +288,15 @@ public class CopilotService : ICopilotService
         var scopes = string.Join(" ", _graphOptions.Scopes);
         _logger.LogInformation("🔑 Requested scopes: {Scopes}", scopes);
         
-        var authUrl = $"{_azureAdOptions.Instance}{_azureAdOptions.TenantId}/oauth2/v2.0/authorize" +
-                     $"?client_id={_azureAdOptions.ClientId}" +
-                     $"&response_type=code" +
-                     $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
-                     $"&response_mode=query" +
-                     $"&scope={Uri.EscapeDataString(scopes)}" +
-                     $"&state={Uri.EscapeDataString(state)}";
+        var tenantId = ResolveTenantId();
+        var clientId = ResolveClientId();
+        var authUrl = $"{_azureAdOptions.Instance}{tenantId}/oauth2/v2.0/authorize" +
+                     $"?client_id={clientId}" +
+                      $"&response_type=code" +
+                      $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
+                      $"&response_mode=query" +
+                      $"&scope={Uri.EscapeDataString(scopes)}" +
+                      $"&state={Uri.EscapeDataString(state)}";
 
         _logger.LogInformation("✅ OAuth URL generated successfully");
         return authUrl;
@@ -256,12 +310,14 @@ public class CopilotService : ICopilotService
             _logger.LogInformation("📍 Redirect URI: {RedirectUri}", redirectUri);
             _logger.LogInformation("🔑 Authorization code length: {CodeLength} characters", code?.Length ?? 0);
             
+            var tenantIdForToken = ResolveTenantId();
+            var clientIdForToken = ResolveClientId();
             var tokenRequest = new HttpRequestMessage(HttpMethod.Post, 
-                $"{_azureAdOptions.Instance}{_azureAdOptions.TenantId}/oauth2/v2.0/token");
+                $"{_azureAdOptions.Instance}{tenantIdForToken}/oauth2/v2.0/token");
 
             var formData = new FormUrlEncodedContent(new[]
             {
-                new KeyValuePair<string, string>("client_id", _azureAdOptions.ClientId),
+                new KeyValuePair<string, string>("client_id", clientIdForToken),
                 new KeyValuePair<string, string>("scope", string.Join(" ", _graphOptions.Scopes)),
                 new KeyValuePair<string, string>("code", code ?? string.Empty),
                 new KeyValuePair<string, string>("redirect_uri", redirectUri),

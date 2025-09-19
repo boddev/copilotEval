@@ -1,0 +1,11 @@
+{
+  "routes": [
+    {
+      "route": "/api/*",
+      "rewrite": "https://copilotevalweb5229.azurewebsites.net/api/*"
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html"
+  }
+}

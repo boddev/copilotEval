@@ -50,6 +50,13 @@ function App() {
     }
   }, []);
 
+  // Auto-load knowledge sources once the user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && knowledgeSources.length === 0 && !isLoadingKnowledgeSources) {
+      loadKnowledgeSources();
+    }
+  }, [isAuthenticated]);
+
   const handleOAuthCallback = async (code: string, state: string) => {
     console.log('🔐 OAuth callback received - Code:', code.substring(0, 20) + '...', 'State:', state);
     setIsAuthenticating(true);
@@ -398,7 +405,7 @@ function App() {
               role="tab"
             >
               <i className="bi bi-check2-square me-2"></i>
-              Validation Testing
+              Single Evaluation
             </button>
           </li>
           <li className="nav-item" role="presentation">
@@ -420,29 +427,23 @@ function App() {
           {activeTab === 'validation' && (
             <div className="row g-4">
               {/* Left Panel - File Upload and Controls */}
-              <div className="col-lg-4">
+              <div className="col-lg-3">
             <div className="card shadow-sm h-100">
               <div className="card-header bg-white">
                 <h5 className="card-title mb-0">
                   <i className="bi bi-upload me-2"></i>
-                  Data Upload & Controls
+                  Single Prompt Evaluation
                 </h5>
               </div>
               <div className="card-body">
-                {/* File Upload */}
+                {/* Instruction Text */}
                 <div className="mb-4">
                   <label className="form-label fw-semibold">
-                    <i className="bi bi-file-earmark-csv me-1"></i>
-                    Upload CSV File
+                    <i className="bi bi-file-earmark-text me-1"></i>
+                    Single prompt input
                   </label>
-                  <input
-                    type="file"
-                    className="form-control"
-                    accept=".csv"
-                    onChange={handleFileUpload}
-                  />
                   <div className="form-text">
-                    CSV should have columns: <code>Prompt</code>, <code>Expected Output</code> or <code>prompt</code>, <code>expectedOutput</code>
+                    Click Add New Entry and enter the appropriate information to evaluation your prompt
                   </div>
                 </div>
 
@@ -574,7 +575,7 @@ function App() {
           </div>
 
               {/* Right Panel - Validation Table */}
-              <div className="col-lg-8">
+              <div className="col-lg-9">
             <div className="card shadow-sm h-100">
               <div className="card-header bg-white">
                 <h5 className="card-title mb-0">
@@ -622,7 +623,7 @@ function App() {
 
               {/* Job Submission */}
               <div className="col-lg-4">
-                <JobSubmission onJobSubmitted={handleJobSubmitted} />
+                <JobSubmission onJobSubmitted={handleJobSubmitted} knowledgeSources={knowledgeSources} knowledgeSourcesLoading={isLoadingKnowledgeSources} />
               </div>
 
               {/* Job List */}

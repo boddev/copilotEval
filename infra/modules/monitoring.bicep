@@ -552,10 +552,6 @@ union traces, customEvents
     functionParameters: 'timeRange:timespan=1h'
   }
 }
-    functionAlias: 'UsageStatistics'
-    functionParameters: 'timeRange:timespan=24h'
-  }
-}
 
 // Workbooks for dashboards
 resource overviewWorkbook 'Microsoft.Insights/workbooks@2022-04-01' = if (environment != 'dev') {

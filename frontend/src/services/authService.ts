@@ -1,7 +1,7 @@
 import axios from 'axios';
 import telemetryService from './telemetryService';
 
-const API_BASE_URL = '/api';
+const API_BASE_URL = ((import.meta as any).env && (import.meta as any).env.VITE_API_BASE) ? (import.meta as any).env.VITE_API_BASE : '/api';
 
 export interface AuthUrlResponse {
   authUrl: string;

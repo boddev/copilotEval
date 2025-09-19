@@ -109,5 +109,20 @@ dist-ssr/
 
 # Rollup build output
 build/
+
+# Deployment artifacts
+publish/
+backend_publish/
+backend/publish/
+
+# Temporary files
+*.zip
+*.bak
+
+# Configuration files with secrets
 backend/appsettings.json
+backend/appsettings.Development.json
+backend/appsettings.Production.json
 backend/M365 Copilot Chat API Documentation.txt
+backend/appsettings.Development.json
+infra/parameters/dev.parameters.json

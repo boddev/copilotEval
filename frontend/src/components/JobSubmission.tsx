@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { JobCreateRequest, JobType } from '../types/Job';
 import { jobService } from '../services/jobService';
+import { ExternalConnection } from '../services/authService';
 
 interface JobSubmissionProps {
   onJobSubmitted?: (jobId: string, statusUrl: string) => void;
+  knowledgeSources?: ExternalConnection[];
+  knowledgeSourcesLoading?: boolean;
 }
 
-export default function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
+export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowledgeSourcesLoading }: JobSubmissionProps) {
   const [formData, setFormData] = useState<JobCreateRequest>({
     name: '',
     description: '',
@@ -172,23 +175,6 @@ export default function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
             />
           </div>
 
-          {/* Job Type */}
-          <div className="mb-3">
-            <label htmlFor="jobType" className="form-label">
-              Job Type
-            </label>
-            <select
-              className="form-select"
-              id="jobType"
-              value={formData.type}
-              onChange={(e) => handleInputChange('type', e.target.value as JobType)}
-            >
-              <option value={JobType.BulkEvaluation}>Bulk Evaluation</option>
-              <option value={JobType.SingleEvaluation}>Single Evaluation</option>
-              <option value={JobType.BatchProcessing}>Batch Processing</option>
-            </select>
-          </div>
-
           {/* Data Source */}
           <div className="mb-3">
             <label htmlFor="dataSource" className="form-label">
@@ -261,7 +247,7 @@ export default function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
           {/* Agent Configuration */}
           <div className="mb-3">
             <label htmlFor="additionalInstructions" className="form-label">
-              Additional Instructions
+              Agent Instructions
             </label>
             <textarea
               className="form-control"
@@ -277,14 +263,32 @@ export default function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
             <label htmlFor="knowledgeSource" className="form-label">
               Knowledge Source
             </label>
-            <input
-              type="text"
-              className="form-control"
+            <select
+              className="form-select"
               id="knowledgeSource"
-              value={formData.configuration.agent_configuration?.knowledge_source}
+              value={formData.configuration.agent_configuration?.knowledge_source || ''}
               onChange={(e) => handleInputChange('agent_configuration.knowledge_source', e.target.value)}
-              placeholder="e.g., edgar_filings, documentation"
-            />
+              disabled={!!knowledgeSourcesLoading}
+            >
+              {knowledgeSourcesLoading ? (
+                <option value="">Loading knowledge sources...</option>
+              ) : (
+                <>
+                  <option value="">No specific source</option>
+                  {knowledgeSources?.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+            {knowledgeSourcesLoading && (
+              <div className="form-text mt-2">
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                Loading knowledge sources...
+              </div>
+            )}
           </div>
 
           {/* Submit Button */}

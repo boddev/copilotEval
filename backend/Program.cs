@@ -44,6 +44,10 @@ builder.Services.AddDbContext<JobDbContext>(options =>
     options.UseInMemoryDatabase("CopilotEvalDb"));
 
 // Configure Azure AD Authentication
+// Capture tenant and client fallback details here so we can log them after building the app using the real ILogger
+string? tenantFallbackMessage = null;
+string? clientFallbackMessage = null;
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -51,6 +55,45 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         var tenantId = azureAdConfig["TenantId"];
         var clientId = azureAdConfig["ClientId"];
         var audience = azureAdConfig["Audience"] ?? clientId;
+
+        // Capture any tenant fallback details so we can log them via the application's ILogger after the app is built.
+        // Avoid building a temporary service provider during configuration to prevent duplicating singleton services.
+        // tenantFallbackMessage is declared in the outer scope and will be assigned here if needed
+        if (string.IsNullOrWhiteSpace(tenantId)
+            || tenantId.IndexOf("YOUR_TENANT", StringComparison.OrdinalIgnoreCase) >= 0
+            || tenantId.IndexOf("YOUR_TENANT_ID", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            var envTenant = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
+            if (!string.IsNullOrWhiteSpace(envTenant))
+            {
+                tenantId = envTenant.Trim();
+                tenantFallbackMessage = "AzureAd:TenantId was missing or a placeholder. Using AZURE_TENANT_ID environment variable.";
+            }
+            else
+            {
+                // Fall back to 'common' for development/multi-tenant scenarios but capture a message to log later
+                tenantId = "common";
+                tenantFallbackMessage = "AzureAd:TenantId was missing or a placeholder. Falling back to 'common'. Set AzureAd:TenantId or AZURE_TENANT_ID to restrict to a tenant.";
+            }
+        }
+
+        // Resolve ClientId similarly so audience/token validation and auth URL generation pick up env var when needed
+        if (string.IsNullOrWhiteSpace(clientId)
+            || clientId.IndexOf("YOUR_APPLICATION_CLIENT_ID", StringComparison.OrdinalIgnoreCase) >= 0
+            || clientId.IndexOf("YOUR_CLIENT_ID", StringComparison.OrdinalIgnoreCase) >= 0
+            || clientId.IndexOf("YOUR-", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            var envClient = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID");
+            if (!string.IsNullOrWhiteSpace(envClient))
+            {
+                clientId = envClient.Trim();
+                clientFallbackMessage = "AzureAd:ClientId was missing or a placeholder. Using AZURE_CLIENT_ID environment variable.";
+            }
+            else
+            {
+                clientFallbackMessage = "AzureAd:ClientId was missing or a placeholder. Set AzureAd:ClientId or AZURE_CLIENT_ID environment variable to a valid client id.";
+            }
+        }
 
         options.Authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
         options.TokenValidationParameters = new TokenValidationParameters
@@ -187,6 +230,15 @@ var app = builder.Build();
 // Trigger rebuild to see latest logs
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 logger.LogInformation("🚀 Copilot Evaluation API starting up...");
+// Emit any tenant fallback messages using the real ILogger (ensures messages go through Application Insights if configured)
+if (!string.IsNullOrWhiteSpace(tenantFallbackMessage))
+{
+    logger.LogWarning(tenantFallbackMessage);
+}
+if (!string.IsNullOrWhiteSpace(clientFallbackMessage))
+{
+    logger.LogWarning(clientFallbackMessage);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -390,7 +442,7 @@ app.MapGet("/api/copilot/knowledge-sources", async (GraphSearchService graphSear
         logger.LogError("🔍 [KnowledgeSources {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
         return Results.BadRequest(new { Error = ex.Message });
     }
-}).RequireAuthorization();
+});
 
 // Enhanced Copilot Chat Endpoint
 app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, GraphSearchService graphSearchService, ChatRequest request, ILogger<Program> logger) =>
