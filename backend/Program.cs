@@ -200,7 +200,7 @@ if (!string.IsNullOrEmpty(appInsightsConnectionString))
 builder.Services.AddCors(options =>
 {
     var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
-        ?? new[] { "http://localhost:3000", "http://localhost:3001", "http://localhost:5173" };
+        ?? new[] { "http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "https://copilotevalst9571.z14.web.core.windows.net", "https://copilotevalweb5229.azurewebsites.net" };
     
     options.AddPolicy("AllowReactApp", policy =>
     {
