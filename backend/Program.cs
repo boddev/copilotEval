@@ -240,6 +240,10 @@ if (!string.IsNullOrWhiteSpace(clientFallbackMessage))
     logger.LogWarning(clientFallbackMessage);
 }
 
+// Log the CORS origins the app actually loaded at runtime
+var corsOriginsLoaded = app.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+logger.LogInformation("CORS origins loaded at startup: {Origins}", string.Join(", ", corsOriginsLoaded));
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
