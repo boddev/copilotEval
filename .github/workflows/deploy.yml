@@ -30,4 +30,4 @@ jobs:
     - name: Upload to Azure Storage Static Website
       working-directory: ./frontend
       run: |
-        az storage blob upload-batch -s ./dist -d '$web' --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}"
+        az storage blob upload-batch -s ./dist -d '$web' --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" --overwrite if-source-newer
