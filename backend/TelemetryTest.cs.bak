@@ -1,17 +1,20 @@
 using System.Diagnostics;
 using CopilotEvalApi.Observability;
+using Microsoft.Extensions.Logging;
 
 // Simple test to verify telemetry is working
-Console.WriteLine("Testing OpenTelemetry instrumentation...");
+using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+var logger = loggerFactory.CreateLogger("TelemetryTest");
+logger.LogInformation("Testing OpenTelemetry instrumentation...");
 
 // Test basic activity creation
 using var activity = Telemetry.ActivitySource.StartActivity("test.operation");
 activity?.SetTag("test.type", "demo");
 activity?.SetTag("test.id", "12345");
 
-Console.WriteLine($"Activity created: {activity?.OperationName}");
-Console.WriteLine($"Activity ID: {activity?.Id}");
-Console.WriteLine($"Trace ID: {activity?.TraceId}");
+logger.LogInformation("Activity created: {OperationName}", activity?.OperationName);
+logger.LogInformation("Activity ID: {ActivityId}", activity?.Id);
+logger.LogInformation("Trace ID: {TraceId}", activity?.TraceId);
 
 // Test metrics
 Telemetry.JobsEnqueued.Add(1, new TagList
@@ -20,7 +23,7 @@ Telemetry.JobsEnqueued.Add(1, new TagList
     { "status", "success" }
 });
 
-Console.WriteLine("Metrics recorded successfully");
+logger.LogInformation("Metrics recorded successfully");
 
 // Test worker telemetry
 using var workerActivity = WorkerTelemetry.ActivitySource.StartActivity("test.worker.operation");
@@ -31,6 +34,7 @@ WorkerTelemetry.MessagesReceived.Add(1, new TagList
     { "queue.name", "test-queue" }
 });
 
-Console.WriteLine("Worker telemetry recorded successfully");
+logger.LogInformation("Worker telemetry recorded successfully");
 
-Console.WriteLine("✅ OpenTelemetry instrumentation test completed successfully!");
+logger.LogInformation("✅ OpenTelemetry instrumentation test completed successfully!");
+loggerFactory.Dispose();

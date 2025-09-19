@@ -14,7 +14,7 @@
     "sqlConfig": {
       "value": {
         "administratorLogin": "copilotadmin",
-        "administratorLoginPassword": "",
+        "administratorLoginPassword": "PocPass123!",
         "databaseName": "copiloteval-dev",
         "skuName": "S1",
         "maxSizeBytes": 21474836480
