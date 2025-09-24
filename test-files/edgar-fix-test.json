@@ -1,0 +1,14 @@
+{
+  "name": "Edgar CSV Column Fix Test",
+  "description": "Testing the column name fix for Edgar CSV format",
+  "type": "bulk_evaluation",
+  "configuration": {
+    "data_source": "edgar-validation-data-formatted.csv",
+    "data_source_blob_ref": "https://copilotevalst9571.blob.core.windows.net/uploads/47775fb5-3e00-4259-b49c-285f43d5a496/edgar-validation-data-formatted.csv",
+    "prompt_template": "",
+    "evaluation_criteria": {
+      "similarity_threshold": 0.8,
+      "use_semantic_scoring": true
+    }
+  }
+}

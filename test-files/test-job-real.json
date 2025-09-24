@@ -1,0 +1,11 @@
+{
+  "name": "Test CSV Upload Job",
+  "description": "Testing actual CSV file upload and processing",
+  "type": "bulk_evaluation",
+  "configuration": {
+    "data_source": "uploaded_test_file",
+    "data_source_blob_ref": "https://copilotevalst9571.blob.core.windows.net/uploads/b17cd243-0187-4ff8-a35c-75f1fd673d1f/test-data.csv",
+    "evaluation_type": "similarity_score",
+    "passing_threshold": 0.7
+  }
+}

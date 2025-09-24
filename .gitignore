@@ -119,6 +119,12 @@ backend/publish/
 *.zip
 *.bak
 
+# Build and deployment artifacts
+**/publish/
+**/bin/Release/
+**/obj/Release/
+backend_app.zip
+
 # Configuration files with secrets
 backend/appsettings.json
 backend/appsettings.Development.json
