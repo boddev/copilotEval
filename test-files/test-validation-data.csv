@@ -1,0 +1,6 @@
+prompt,expected_response
+"What is React?","React is a JavaScript library for building user interfaces"
+"How do you create a component in React?","You can create a React component by defining a function or class that returns JSX"
+"What is JSX?","JSX is a syntax extension for JavaScript that allows you to write HTML-like code in your React components"
+"What is the useState hook?","useState is a React hook that allows you to add state to functional components"
+"How do you handle events in React?","You handle events in React by passing event handler functions to JSX elements"

@@ -94,7 +94,7 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
       }
 
       const blobRef = await res.json();
-      return blobRef?.access_url || null;
+      return blobRef?.accessUrl || blobRef?.access_url || null;
     } catch (err) {
       console.error('❌ File upload failed', err);
       setError(err instanceof Error ? err.message : 'File upload failed');
@@ -107,6 +107,9 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Prepare the final form data with uploaded file blob reference if present
+    let finalFormData = { ...formData };
+    
     // If a file is selected, upload it first and set its blob reference on the job configuration
     if (selectedFile) {
       const accessUrl = await uploadSelectedFile();
@@ -114,14 +117,14 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
         return; // Upload failed, abort submit
       }
 
-      setFormData(prev => ({
-        ...prev,
+      finalFormData = {
+        ...finalFormData,
         configuration: {
-          ...prev.configuration,
+          ...finalFormData.configuration,
           data_source_blob_ref: accessUrl,
-          data_source: prev.configuration.data_source || selectedFile.name
+          data_source: finalFormData.configuration.data_source || selectedFile.name
         }
-      }));
+      };
     }
 
     if (!validateForm()) {
@@ -132,12 +135,16 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
     setError(null);
 
     try {
-      const response = await jobService.submitJob(formData);
+      console.log('🚀 Submitting job with configuration:', finalFormData.configuration);
+      const response = await jobService.submitJob(finalFormData);
       console.log('🎉 Job submitted successfully:', response);
 
       if (onJobSubmitted) {
         onJobSubmitted(response.job_id, response.status_url);
       }
+
+      // Update the form data state to reflect what was actually submitted
+      setFormData(finalFormData);
 
       // Reset form
       setFormData({

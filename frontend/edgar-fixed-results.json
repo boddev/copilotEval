@@ -1,0 +1,57 @@
+{
+  "summary": {
+    "total_evaluations": 5,
+    "passed_evaluations": 0,
+    "failed_evaluations": 5,
+    "average_score": 0.188,
+    "pass_rate": 0
+  },
+  "download_url": null,
+  "detailed_results": [
+    {
+      "item_id": "row_001",
+      "prompt": "How do the 2024 financial results of Salesforce compare to Microsoft based on their 10-K reports?",
+      "expected_response": "In the quarter ending December 31",
+      "actual_response": "Analysis shows strong performance indicators with positive trends across key metrics.",
+      "similarity_score": 0.17176470588235293,
+      "passed": false,
+      "evaluation_details": null
+    },
+    {
+      "item_id": "row_002",
+      "prompt": "How many outstanding shares did each company have during their last 10-Q filing",
+      "expected_response": "According to the latest quarterly report filed for the period ending March 31",
+      "actual_response": "The assessment reveals important insights that support strategic decision-making and operational planning.",
+      "similarity_score": 0.2715340442986054,
+      "passed": false,
+      "evaluation_details": null
+    },
+    {
+      "item_id": "row_003",
+      "prompt": "Over the last 6 quarters what were the earnings per share for Meta",
+      "expected_response": "Alphabet",
+      "actual_response": "Comprehensive review indicates alignment with established criteria and performance standards.",
+      "similarity_score": 0.054838709677419384,
+      "passed": false,
+      "evaluation_details": null
+    },
+    {
+      "item_id": "row_004",
+      "prompt": "What was the earnings per share for Nvidia over the same time period",
+      "expected_response": "Fiscal Quarter Period End EPS (Diluted): Q2 FY2025 July 30",
+      "actual_response": "Based on the available data, the findings indicate favorable conditions with sustainable growth potential.",
+      "similarity_score": 0.1990566037735849,
+      "passed": false,
+      "evaluation_details": null
+    },
+    {
+      "item_id": "row_005",
+      "prompt": "What is your analysis for highest potential earning with the new dataset",
+      "expected_response": "Based on the EPS data over the last 6 quarters",
+      "actual_response": "Analysis shows strong performance indicators with positive trends across key metrics.",
+      "similarity_score": 0.24352941176470588,
+      "passed": false,
+      "evaluation_details": null
+    }
+  ]
+}

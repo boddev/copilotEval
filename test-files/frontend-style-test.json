@@ -1,0 +1,17 @@
+{
+  "name": "Frontend Style Test Job",
+  "description": "Testing frontend-style job submission with CSV upload",
+  "type": "bulk_evaluation",
+  "configuration": {
+    "data_source": "test-data.csv",
+    "data_source_blob_ref": "https://copilotevalst9571.blob.core.windows.net/uploads/2cb1d49c-5874-4a39-b56a-6a19b70559bb/test-data.csv",
+    "prompt_template": "",
+    "evaluation_criteria": {
+      "similarity_threshold": 0.8,
+      "use_semantic_scoring": true
+    },
+    "agent_configuration": {
+      "additional_instructions": ""
+    }
+  }
+}

@@ -286,20 +286,36 @@ public class ExecutionService : IExecutionService
 
     private async Task<List<Dictionary<string, string>>> ParseCsvDataAsync(Job job, string requestId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("📋 [Execution {RequestId}] Parsing CSV data from: {DataSource}", requestId, job.Configuration.DataSource);
+        // Prioritize DataSourceBlobRef (uploaded file) over DataSource (static reference)
+        var dataSourceUrl = job.Configuration.DataSourceBlobRef ?? job.Configuration.DataSource;
+        
+        _logger.LogCritical("� [DEBUG {RequestId}] JOB CONFIGURATION ANALYSIS:", requestId);
+        _logger.LogCritical("🔍 [DEBUG {RequestId}] - Job ID: {JobId}", requestId, job.Id);
+        _logger.LogCritical("🔍 [DEBUG {RequestId}] - DataSource: '{DataSource}'", requestId, job.Configuration.DataSource ?? "NULL");
+        _logger.LogCritical("🔍 [DEBUG {RequestId}] - DataSourceBlobRef: '{DataSourceBlobRef}'", requestId, job.Configuration.DataSourceBlobRef ?? "NULL");
+        _logger.LogCritical("🔍 [DEBUG {RequestId}] - Using URL: '{DataSourceUrl}'", requestId, dataSourceUrl ?? "NULL");
+        _logger.LogCritical("🔍 [DEBUG {RequestId}] - BlobServiceClient null: {IsNull}", requestId, _blobServiceClient == null);
 
         var csvData = new List<Dictionary<string, string>>();
 
         try
         {
-            if (_blobServiceClient == null || string.IsNullOrEmpty(job.Configuration.DataSource))
+            if (_blobServiceClient == null)
             {
-                _logger.LogWarning("⚠️ [Execution {RequestId}] No blob storage or data source configured, using sample data", requestId);
+                _logger.LogError("❌ [Execution {RequestId}] BlobServiceClient is null - blob storage not configured properly, using sample data", requestId);
+                return GetSampleCsvData();
+            }
+            
+            if (string.IsNullOrEmpty(dataSourceUrl))
+            {
+                _logger.LogError("❌ [Execution {RequestId}] No data source URL provided - job configuration missing data_source_blob_ref and data_source, using sample data", requestId);
                 return GetSampleCsvData();
             }
 
+            _logger.LogInformation("📦 [Execution {RequestId}] Attempting to read from blob URL: {BlobUrl}", requestId, dataSourceUrl);
+
             // Parse blob URL to get container and blob name
-            var uri = new Uri(job.Configuration.DataSource);
+            var uri = new Uri(dataSourceUrl);
             var pathParts = uri.AbsolutePath.TrimStart('/').Split('/');
             
             if (pathParts.Length < 2)
@@ -378,10 +394,23 @@ public class ExecutionService : IExecutionService
         };
     }
 
+    private List<Dictionary<string, string>> GetTestUploadedCsvData()
+    {
+        // This simulates the uploaded CSV data to test the flow
+        return new List<Dictionary<string, string>>
+        {
+            new() { ["prompt"] = "What is React?", ["expected_response"] = "React is a JavaScript library for building user interfaces" },
+            new() { ["prompt"] = "How do you create a component in React?", ["expected_response"] = "You can create a React component by defining a function or class that returns JSX" },
+            new() { ["prompt"] = "What is JSX?", ["expected_response"] = "JSX is a syntax extension for JavaScript that allows you to write HTML-like code in your React components" },
+            new() { ["prompt"] = "What is the useState hook?", ["expected_response"] = "useState is a React hook that allows you to add state to functional components" }
+        };
+    }
+
     private async Task<EvaluationResult> ProcessSinglePromptAsync(Dictionary<string, string> csvRow, string itemId, JobConfiguration config, string requestId, CancellationToken cancellationToken)
     {
-        var prompt = csvRow.GetValueOrDefault("prompt", "");
-        var expectedResponse = csvRow.GetValueOrDefault("expected_response", "");
+        // Handle different CSV column name formats (case-insensitive and flexible naming)
+        var prompt = GetCsvValue(csvRow, "prompt", "Prompt", "PROMPT");
+        var expectedResponse = GetCsvValue(csvRow, "expected_response", "expected_output", "Expected Output", "EXPECTED_OUTPUT", "expected", "Expected");
 
         _logger.LogInformation("🔍 [Execution {RequestId}] Processing prompt: {Prompt}", requestId, prompt.Length > 50 ? prompt[..50] + "..." : prompt);
 
@@ -394,6 +423,14 @@ public class ExecutionService : IExecutionService
             var similarityScore = await CalculateSimilarityScoreAsync(expectedResponse, actualResponse, requestId, cancellationToken);
             var passed = similarityScore >= (config.EvaluationCriteria?.SimilarityThreshold ?? 0.8);
 
+            // Generate evaluation details with reasoning
+            var passThreshold = config.EvaluationCriteria?.SimilarityThreshold ?? 0.8;
+            var reasoning = similarityScore >= passThreshold 
+                ? $"Response passed with {similarityScore:P1} similarity (threshold: {passThreshold:P1})"
+                : $"Response failed with {similarityScore:P1} similarity (threshold: {passThreshold:P1})";
+
+            var differences = GenerateDifferencesAnalysis(expectedResponse, actualResponse, similarityScore);
+
             return new EvaluationResult
             {
                 ItemId = itemId,
@@ -401,7 +438,12 @@ public class ExecutionService : IExecutionService
                 ExpectedResponse = expectedResponse,
                 ActualResponse = actualResponse,
                 SimilarityScore = similarityScore,
-                Passed = passed
+                Passed = passed,
+                EvaluationDetails = new EvaluationDetails
+                {
+                    Reasoning = reasoning,
+                    Differences = differences
+                }
             };
         }
         catch (Exception ex)
@@ -414,9 +456,26 @@ public class ExecutionService : IExecutionService
                 ExpectedResponse = expectedResponse,
                 ActualResponse = "Error: Failed to generate response",
                 SimilarityScore = 0.0,
-                Passed = false
+                Passed = false,
+                EvaluationDetails = new EvaluationDetails
+                {
+                    Reasoning = "Evaluation failed due to an error during processing",
+                    Differences = $"Error occurred: {ex.Message}"
+                }
             };
         }
+    }
+
+    private string GetCsvValue(Dictionary<string, string> csvRow, params string[] possibleKeys)
+    {
+        foreach (var key in possibleKeys)
+        {
+            if (csvRow.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+        }
+        return "";
     }
 
     private async Task<string> GenerateAIResponseAsync(string prompt, JobConfiguration config, string requestId, CancellationToken cancellationToken)
@@ -706,6 +765,36 @@ public class ExecutionService : IExecutionService
             NotSupportedException or
             InvalidOperationException
         );
+    }
+
+    private string GenerateDifferencesAnalysis(string expected, string actual, double similarityScore)
+    {
+        if (string.IsNullOrEmpty(expected) && string.IsNullOrEmpty(actual))
+            return "Both expected and actual responses are empty";
+        
+        if (string.IsNullOrEmpty(expected))
+            return "Expected response is empty, but actual response was provided";
+        
+        if (string.IsNullOrEmpty(actual))
+            return "Actual response is empty, but expected response was provided";
+
+        // Simple character-based analysis for basic differences
+        var expectedLength = expected.Length;
+        var actualLength = actual.Length;
+        var lengthDiff = Math.Abs(expectedLength - actualLength);
+        
+        if (similarityScore >= 0.9)
+            return lengthDiff <= 10 
+                ? "Responses are very similar with minimal differences"
+                : $"Responses are very similar but differ in length (expected: {expectedLength}, actual: {actualLength} chars)";
+        
+        if (similarityScore >= 0.7)
+            return $"Responses have moderate differences. Length difference: {lengthDiff} characters";
+        
+        if (similarityScore >= 0.5)
+            return $"Responses have significant differences. Expected length: {expectedLength}, actual: {actualLength} characters";
+        
+        return "Responses are substantially different in content and structure";
     }
 }
 
