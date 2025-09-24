@@ -3,6 +3,8 @@ using CopilotEvalApi.Models;
 using CopilotEvalApi.Services;
 using CopilotEvalApi.Repositories;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using Azure.Storage.Blobs;
 
 namespace CopilotEvalApi.Controllers;
 
@@ -16,15 +18,18 @@ public class JobsController : ControllerBase
     private readonly IJobRepository _jobRepository;
     private readonly IJobQueueService _jobQueueService;
     private readonly ILogger<JobsController> _logger;
+    private readonly IConfiguration _configuration;
 
     public JobsController(
         IJobRepository jobRepository,
         IJobQueueService jobQueueService,
-        ILogger<JobsController> logger)
+        ILogger<JobsController> logger,
+        IConfiguration configuration)
     {
         _jobRepository = jobRepository;
         _jobQueueService = jobQueueService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -168,6 +173,225 @@ public class JobsController : ControllerBase
             
             return StatusCode(500, new ErrorResponse(
                 new ErrorDetails("INTERNAL_ERROR", "An error occurred while retrieving the job")
+                {
+                    Details = new Dictionary<string, object> { { "trace_id", requestId } }
+                }
+            ));
+        }
+    }
+
+    /// <summary>
+    /// Download job results as a file
+    /// </summary>
+    /// <param name="id">Job ID</param>
+    /// <returns>Job results file</returns>
+    [HttpGet("{id}/results")]
+    [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(typeof(ErrorResponse), 404)]
+    [ProducesResponseType(typeof(ErrorResponse), 500)]
+    public async Task<IActionResult> DownloadJobResults(string id)
+    {
+        var requestId = Guid.NewGuid().ToString("N")[..8];
+        _logger.LogInformation("📥 [Download {RequestId}] Downloading results for job: {JobId}", requestId, id);
+
+        try
+        {
+            // Get job details
+            var jobEntity = await _jobRepository.GetJobByIdAsync(id);
+            
+            if (jobEntity == null)
+            {
+                _logger.LogWarning("❌ [Download {RequestId}] Job not found: {JobId}", requestId, id);
+                return NotFound(new ErrorResponse(
+                    new ErrorDetails("JOB_NOT_FOUND", $"Job with ID '{id}' was not found")
+                ));
+            }
+
+            // Check if job is completed
+            if (jobEntity.Status != JobStatus.Completed)
+            {
+                _logger.LogWarning("❌ [Download {RequestId}] Job not completed: {JobId}, Status: {Status}", requestId, id, jobEntity.Status);
+                return BadRequest(new ErrorResponse(
+                    new ErrorDetails("JOB_NOT_COMPLETED", $"Job '{id}' is not completed. Current status: {jobEntity.Status}")
+                ));
+            }
+
+            // Check if job has results - look for stored blob reference
+            if (string.IsNullOrEmpty(jobEntity.ResultsBlobReferenceJson))
+            {
+                _logger.LogWarning("❌ [Download {RequestId}] No results blob reference for job: {JobId}", requestId, id);
+                
+                // For older jobs without blob references, return basic job info
+                var basicJob = jobEntity.ToJob();
+                var basicDownloadData = new
+                {
+                    job_id = basicJob.Id,
+                    job_name = basicJob.Name,
+                    job_type = basicJob.Type,
+                    status = basicJob.Status,
+                    created_at = basicJob.CreatedAt,
+                    completed_at = basicJob.CompletedAt,
+                    configuration = basicJob.Configuration,
+                    results = new
+                    {
+                        message = "Job completed successfully",
+                        note = "This job was completed before detailed results storage was implemented"
+                    }
+                };
+
+                var basicJobJson = JsonSerializer.Serialize(basicDownloadData, new JsonSerializerOptions 
+                { 
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                });
+
+                var basicFileName = $"job_{id}_basic_results.json";
+                var basicFileBytes = System.Text.Encoding.UTF8.GetBytes(basicJobJson);
+
+                _logger.LogInformation("✅ [Download {RequestId}] Basic results downloaded: {JobId}, Size: {Size} bytes", requestId, id, basicFileBytes.Length);
+                return File(basicFileBytes, "application/json", basicFileName);
+            }
+
+            // Try to deserialize blob reference
+            BlobReference? blobReference;
+            try
+            {
+                blobReference = JsonSerializer.Deserialize<BlobReference>(jobEntity.ResultsBlobReferenceJson);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("💥 [Download {RequestId}] Error deserializing blob reference for job {JobId}: {Error}", requestId, id, ex.Message);
+                return StatusCode(500, new ErrorResponse(
+                    new ErrorDetails("BLOB_REFERENCE_ERROR", "Error accessing job results")
+                    {
+                        Details = new Dictionary<string, object> { { "trace_id", requestId } }
+                    }
+                ));
+            }
+
+            if (blobReference == null)
+            {
+                _logger.LogWarning("❌ [Download {RequestId}] Null blob reference for job: {JobId}", requestId, id);
+                return NotFound(new ErrorResponse(
+                    new ErrorDetails("NO_RESULTS", $"No results available for job '{id}'")
+                ));
+            }
+
+            // Try to download the actual blob content from Azure Storage
+            _logger.LogInformation("📦 [Download {RequestId}] Downloading blob content: {BlobName}", requestId, blobReference.BlobName);
+            
+            try
+            {
+                // Initialize blob service client
+                var storageConnectionString = _configuration.GetConnectionString("BlobStorage");
+                if (string.IsNullOrEmpty(storageConnectionString) || storageConnectionString == "InMemory")
+                {
+                    _logger.LogWarning("⚠️ [Download {RequestId}] Blob storage not configured, returning metadata", requestId);
+                    // Fallback to metadata response
+                    var job = jobEntity.ToJob();
+                    var downloadData = new
+                    {
+                        job_id = job.Id,
+                        job_name = job.Name,
+                        job_type = job.Type,
+                        status = job.Status,
+                        created_at = job.CreatedAt,
+                        completed_at = job.CompletedAt,
+                        configuration = job.Configuration,
+                        blob_info = new
+                        {
+                            blob_id = blobReference.BlobId,
+                            container = blobReference.Container,
+                            blob_name = blobReference.BlobName,
+                            content_type = blobReference.ContentType,
+                            size_bytes = blobReference.SizeBytes,
+                            access_url = blobReference.AccessUrl,
+                            created_at = blobReference.CreatedAt
+                        },
+                        results = new
+                        {
+                            message = "Job completed with detailed results",
+                            note = "Blob storage not configured for direct download. Please check blob storage settings."
+                        }
+                    };
+                    
+                    var fallbackJson = JsonSerializer.Serialize(downloadData, new JsonSerializerOptions 
+                    { 
+                        WriteIndented = true,
+                        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                    });
+                    var fallbackBytes = System.Text.Encoding.UTF8.GetBytes(fallbackJson);
+                    var fallbackFileName = $"job_{id}_metadata.json";
+                    return File(fallbackBytes, "application/json", fallbackFileName);
+                }
+
+                var blobServiceClient = new BlobServiceClient(storageConnectionString);
+                var containerClient = blobServiceClient.GetBlobContainerClient(blobReference.Container);
+                var blobClient = containerClient.GetBlobClient(blobReference.BlobName);
+
+                // Check if blob exists
+                var exists = await blobClient.ExistsAsync();
+                if (!exists.Value)
+                {
+                    _logger.LogWarning("❌ [Download {RequestId}] Blob not found: {BlobName}", requestId, blobReference.BlobName);
+                    return NotFound(new ErrorResponse(
+                        new ErrorDetails("BLOB_NOT_FOUND", $"Results file not found for job '{id}'")
+                    ));
+                }
+
+                // Download blob content
+                var blobDownloadInfo = await blobClient.DownloadAsync();
+                using var memoryStream = new MemoryStream();
+                await blobDownloadInfo.Value.Content.CopyToAsync(memoryStream);
+                var blobBytes = memoryStream.ToArray();
+
+                _logger.LogInformation("✅ [Download {RequestId}] Blob downloaded successfully: {BlobName}, Size: {Size} bytes", 
+                    requestId, blobReference.BlobName, blobBytes.Length);
+
+                // Try to parse the blob content as JSON to verify it contains evaluation results
+                try
+                {
+                    var blobContent = System.Text.Encoding.UTF8.GetString(blobBytes);
+                    var parsedResults = JsonSerializer.Deserialize<JsonElement>(blobContent);
+                    
+                    // Check if it looks like evaluation results
+                    if (parsedResults.TryGetProperty("detailed_results", out var detailedResults))
+                    {
+                        _logger.LogInformation("📊 [Download {RequestId}] Confirmed evaluation results with {Count} detailed items", 
+                            requestId, detailedResults.GetArrayLength());
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning("⚠️ [Download {RequestId}] Could not parse blob content as JSON: {Error}", requestId, parseEx.Message);
+                }
+
+                // Return the actual blob content
+                var fileName = $"job_{id}_detailed_results.json";
+                return File(blobBytes, blobReference.ContentType ?? "application/json", fileName);
+            }
+            catch (Exception blobEx)
+            {
+                _logger.LogError("💥 [Download {RequestId}] Error downloading blob {BlobName}: {Error}", 
+                    requestId, blobReference.BlobName, blobEx.Message);
+                return StatusCode(500, new ErrorResponse(
+                    new ErrorDetails("BLOB_DOWNLOAD_ERROR", "Error downloading job results from storage")
+                    {
+                        Details = new Dictionary<string, object> 
+                        { 
+                            { "trace_id", requestId },
+                            { "blob_name", blobReference.BlobName }
+                        }
+                    }
+                ));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("💥 [Download {RequestId}] Error downloading job results {JobId}: {Error}", requestId, id, ex.Message);
+            
+            return StatusCode(500, new ErrorResponse(
+                new ErrorDetails("INTERNAL_ERROR", "An error occurred while downloading the job results")
                 {
                     Details = new Dictionary<string, object> { { "trace_id", requestId } }
                 }

@@ -127,6 +127,17 @@ export default function JobStatus({
     }
   };
 
+  const handleDownloadResults = async () => {
+    if (!job || job.status !== JobStatusEnum.Completed) return;
+
+    try {
+      await jobService.downloadJobResults(jobId);
+    } catch (err) {
+      console.error('Failed to download results:', err);
+      setError('Failed to download job results');
+    }
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -360,7 +371,10 @@ export default function JobStatus({
             </button>
           )}
           {job.status === JobStatusEnum.Completed && (
-            <button className="btn btn-success" disabled>
+            <button 
+              className="btn btn-success" 
+              onClick={handleDownloadResults}
+            >
               <i className="bi bi-download me-2"></i>
               Download Results
             </button>

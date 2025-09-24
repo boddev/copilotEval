@@ -39,9 +39,20 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
     });
 
-// Add Entity Framework with In-Memory database for development
+// Add Entity Framework with SQL Server database
 builder.Services.AddDbContext<JobDbContext>(options =>
-    options.UseInMemoryDatabase("CopilotEvalDb"));
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        // Fallback to In-Memory database if no connection string is configured
+        options.UseInMemoryDatabase("CopilotEvalDb");
+    }
+    else
+    {
+        options.UseSqlServer(connectionString);
+    }
+});
 
 // Configure Azure AD Authentication
 // Capture tenant and client fallback details here so we can log them after building the app using the real ILogger
@@ -226,6 +237,14 @@ builder.Services.AddScoped<IExecutionService, ExecutionService>();
 builder.Services.AddHostedService<JobProcessor>();
 
 var app = builder.Build();
+
+// Ensure database is created for development
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    var context = scope.ServiceProvider.GetRequiredService<JobDbContext>();
+    context.Database.EnsureCreated();
+}
 
 // Trigger rebuild to see latest logs
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
@@ -601,11 +620,12 @@ app.MapPost("/api/copilot/chat", async (ICopilotService copilotService, GraphSea
             Attributions: null
         ));
     }
+    
     catch (Exception ex)
     {
         logger.LogError("💥 [Request {RequestId}] Unexpected error: {Error}", requestId, ex.Message);
         logger.LogError("🔍 [Request {RequestId}] Exception Details: {Details}", requestId, ex.ToString());
-        
+
         return Results.Problem(new ChatResponse(
             Response: "",
             Success: false,
@@ -762,6 +782,66 @@ Focus on semantic meaning rather than exact word matching. Start your response w
     }
 }).RequireAuthorization();
 
+// Temporary debug endpoint to manually trigger job processing
+app.MapPost("/api/debug/process-job/{jobId}", async (string jobId, IJobRepository jobRepository, IExecutionService executionService, ILogger<Program> logger) =>
+{
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    logger.LogInformation("🔧 [Debug {RequestId}] Manually triggering job processing for: {JobId}", requestId, jobId);
+    
+    try
+    {
+        // Get the job from database
+        var jobEntity = await jobRepository.GetJobByIdAsync(jobId);
+        if (jobEntity == null)
+        {
+            logger.LogError("❌ [Debug {RequestId}] Job not found: {JobId}", requestId, jobId);
+            return Results.NotFound(new { error = $"Job {jobId} not found" });
+        }
+        
+        var job = jobEntity.ToJob();
+        logger.LogInformation("✅ [Debug {RequestId}] Job found, starting execution: {JobName}", requestId, job.Name);
+        
+        // Execute the job directly
+        var result = await executionService.ExecuteJobAsync(job);
+        
+        if (result.Success)
+        {
+            // Update job status to completed
+            jobEntity.Status = JobStatus.Completed;
+            jobEntity.CompletedAt = DateTimeOffset.UtcNow;
+            
+            if (result.ArtifactBlobReference != null)
+            {
+                jobEntity.ResultsBlobReferenceJson = System.Text.Json.JsonSerializer.Serialize(result.ArtifactBlobReference);
+            }
+            
+            await jobRepository.UpdateJobAsync(jobEntity);
+            
+            logger.LogInformation("✅ [Debug {RequestId}] Job completed successfully: {JobId}", requestId, jobId);
+            return Results.Ok(new { 
+                message = "Job processed successfully", 
+                jobId = jobId,
+                status = "completed",
+                hasResults = result.ArtifactBlobReference != null,
+                resultsSummary = result.Results?.Summary
+            });
+        }
+        else
+        {
+            logger.LogError("❌ [Debug {RequestId}] Job execution failed: {JobId}", requestId, jobId);
+            return Results.BadRequest(new { 
+                error = "Job execution failed", 
+                details = result.ErrorDetails 
+            });
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "💥 [Debug {RequestId}] Error processing job: {JobId}", requestId, jobId);
+        return Results.Problem(new { error = ex.Message }.ToString());
+    }
+}).RequireAuthorization();
+
 app.Run();
 
 logger.LogInformation("🛑 Copilot Evaluation API shutting down...");
@@ -895,3 +975,4 @@ static (double score, string reasoning, string differences) ParseEvaluationRespo
         return (0.5, $"Error parsing response: {ex.Message}", "Unable to determine differences due to parsing error");
     }
 }
+

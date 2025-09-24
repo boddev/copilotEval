@@ -46,6 +46,9 @@ public class JobEntity
     // Store error details as JSON string (nullable)
     public string? ErrorDetailsJson { get; set; }
 
+    // Store results blob reference as JSON string (nullable)
+    public string? ResultsBlobReferenceJson { get; set; }
+
     /// <summary>
     /// Convert JobEntity to Job model
     /// </summary>

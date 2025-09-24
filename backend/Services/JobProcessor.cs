@@ -382,14 +382,31 @@ public class JobProcessor : BackgroundService
                 // Update the job entity with artifact reference if available
                 if (executionResult.ArtifactBlobReference != null)
                 {
-                    // Store the blob reference in the job configuration or a new field
                     var updatedEntity = await jobRepository.GetJobByIdAsync(job.Id);
                     if (updatedEntity != null)
                     {
-                        // For now, we'll store the blob reference in a simple way
-                        // In production, you might want to add a dedicated field to JobEntity
+                        // Store the blob reference in the JobEntity
+                        updatedEntity.ResultsBlobReferenceJson = System.Text.Json.JsonSerializer.Serialize(executionResult.ArtifactBlobReference);
+                        updatedEntity.Status = JobStatus.Completed;
+                        updatedEntity.CompletedAt = DateTimeOffset.UtcNow;
+                        
+                        await jobRepository.UpdateJobAsync(updatedEntity);
+                        
                         _logger.LogInformation("📦 [Processor {RequestId}] Job artifacts stored at: {BlobUrl}", 
                             requestId, executionResult.ArtifactBlobReference.AccessUrl);
+                        _logger.LogInformation("💾 [Processor {RequestId}] Blob reference saved to job entity: {JobId}", 
+                            requestId, job.Id);
+                    }
+                }
+                else
+                {
+                    // No blob reference, just mark as completed
+                    var updatedEntity = await jobRepository.GetJobByIdAsync(job.Id);
+                    if (updatedEntity != null)
+                    {
+                        updatedEntity.Status = JobStatus.Completed;
+                        updatedEntity.CompletedAt = DateTimeOffset.UtcNow;
+                        await jobRepository.UpdateJobAsync(updatedEntity);
                     }
                 }
 

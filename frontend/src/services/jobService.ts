@@ -89,6 +89,37 @@ export const jobService = {
     }
   },
 
+  // Download job results
+  async downloadJobResults(jobId: string): Promise<void> {
+    try {
+      const response = await jobApiClient.get(`/jobs/${jobId}/results`, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      // Create blob URL and trigger download
+      const blob = new Blob([response.data], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `job_${jobId}_detailed_results.json`;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.data) {
+        const errorData = error.response.data as ErrorResponse;
+        throw new Error(errorData.error?.message || 'Failed to download job results');
+      }
+      throw new Error('Failed to download job results');
+    }
+  },
+
   // Helper function to build status URL
   buildStatusUrl(jobId: string): string {
     return `${window.location.origin}/jobs/${jobId}`;

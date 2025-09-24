@@ -31,6 +31,8 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -43,17 +45,85 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
       errors.data_source = 'Data source is required';
     }
 
-    if (!formData.configuration.prompt_template?.trim()) {
-      errors.prompt_template = 'Prompt template is required';
-    }
-
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+    setSelectedFile(file);
+
+    // If a file is selected, set the data_source field to the file name for display purposes
+    if (file) {
+      setFormData(prev => ({
+        ...prev,
+        configuration: {
+          ...prev.configuration,
+          data_source: file.name
+        }
+      }));
+    }
+
+    // Clear validation error for data_source
+    if (validationErrors.data_source) {
+      setValidationErrors(prev => {
+        const updated = { ...prev };
+        delete updated.data_source;
+        return updated;
+      });
+    }
+  };
+
+  // Helper to upload selected file to backend and return access URL
+  const uploadSelectedFile = async (): Promise<string | null> => {
+    if (!selectedFile) return null;
+
+    setUploadingFile(true);
+    try {
+      const form = new FormData();
+      form.append('file', selectedFile, selectedFile.name);
+
+      const res = await fetch('/api/uploads', {
+        method: 'POST',
+        body: form
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null);
+        throw new Error(errorBody?.error?.message || 'Failed to upload file');
+      }
+
+      const blobRef = await res.json();
+      return blobRef?.access_url || null;
+    } catch (err) {
+      console.error('❌ File upload failed', err);
+      setError(err instanceof Error ? err.message : 'File upload failed');
+      return null;
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // If a file is selected, upload it first and set its blob reference on the job configuration
+    if (selectedFile) {
+      const accessUrl = await uploadSelectedFile();
+      if (!accessUrl) {
+        return; // Upload failed, abort submit
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        configuration: {
+          ...prev.configuration,
+          data_source_blob_ref: accessUrl,
+          data_source: prev.configuration.data_source || selectedFile.name
+        }
+      }));
+    }
+
     if (!validateForm()) {
       return;
     }
@@ -64,7 +134,7 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
     try {
       const response = await jobService.submitJob(formData);
       console.log('🎉 Job submitted successfully:', response);
-      
+
       if (onJobSubmitted) {
         onJobSubmitted(response.job_id, response.status_url);
       }
@@ -87,6 +157,12 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
           }
         }
       });
+
+      // Reset file selection
+      setSelectedFile(null);
+      const fileInput = document.getElementById('dataSourceFile') as HTMLInputElement | null;
+      if (fileInput) fileInput.value = '';
+
     } catch (err) {
       console.error('❌ Failed to submit job:', err);
       setError(err instanceof Error ? err.message : 'Failed to submit job');
@@ -103,7 +179,7 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
         configuration: {
           ...prev.configuration,
           [parent]: {
-            ...prev.configuration[parent as keyof typeof prev.configuration],
+            ...(prev.configuration[parent as keyof typeof prev.configuration] as any),
             [child]: value
           }
         }
@@ -180,16 +256,32 @@ export default function JobSubmission({ onJobSubmitted, knowledgeSources, knowle
             <label htmlFor="dataSource" className="form-label">
               Data Source <span className="text-danger">*</span>
             </label>
-            <input
-              type="text"
-              className={`form-control ${validationErrors.data_source ? 'is-invalid' : ''}`}
-              id="dataSource"
-              value={formData.configuration.data_source}
-              onChange={(e) => handleInputChange('data_source', e.target.value)}
-              placeholder="e.g., validation-data.csv"
-            />
+            <div className="d-flex align-items-start">
+              <input
+                type="text"
+                className={`form-control ${validationErrors.data_source ? 'is-invalid' : ''}`}
+                id="dataSource"
+                value={formData.configuration.data_source}
+                onChange={(e) => handleInputChange('data_source', e.target.value)}
+                placeholder="e.g., validation-data.csv"
+              />
+
+              <div className="ms-3">
+                <input
+                  type="file"
+                  id="dataSourceFile"
+                  accept=".csv,text/csv"
+                  onChange={handleFileChange}
+                  aria-label="Select CSV file"
+                />
+                {uploadingFile && (
+                  <div className="form-text mt-1">Uploading file...</div>
+                )}
+              </div>
+            </div>
+
             {validationErrors.data_source && (
-              <div className="invalid-feedback">{validationErrors.data_source}</div>
+              <div className="invalid-feedback d-block">{validationErrors.data_source}</div>
             )}
           </div>
 

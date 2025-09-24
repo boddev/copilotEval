@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Proxy Test</title>
+</head>
+<body>
+    <h1>Proxy Test</h1>
+    <button onclick="testHealth()">Test Health Endpoint</button>
+    <button onclick="testUploads()">Test Uploads Endpoint</button>
+    <div id="results"></div>
+
+    <script>
+        async function testHealth() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.text();
+                document.getElementById('results').innerHTML = '<h3>Health Response:</h3><pre>' + data + '</pre>';
+            } catch (error) {
+                document.getElementById('results').innerHTML = '<h3>Health Error:</h3><pre>' + error.message + '</pre>';
+            }
+        }
+
+        async function testUploads() {
+            try {
+                const response = await fetch('/api/uploads', { method: 'POST' });
+                const data = await response.text();
+                document.getElementById('results').innerHTML = '<h3>Uploads Response:</h3><pre>Status: ' + response.status + '\n' + data + '</pre>';
+            } catch (error) {
+                document.getElementById('results').innerHTML = '<h3>Uploads Error:</h3><pre>' + error.message + '</pre>';
+            }
+        }
+    </script>
+</body>
+</html>
