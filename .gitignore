@@ -132,3 +132,6 @@ backend/appsettings.Production.json
 backend/M365 Copilot Chat API Documentation.txt
 backend/appsettings.Development.json
 infra/parameters/dev.parameters.json
+backend/appsettings.Development.json
+test-files/ibiscopy.csv
+test-files/ibis.csv

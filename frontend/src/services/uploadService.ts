@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { authService } from './authService';
 
 export interface BlobReference {
   blobId: string;
@@ -26,10 +27,18 @@ export const uploadService = {
       const formData = new FormData();
       formData.append('file', file);
 
+      // Get access token
+      const token = authService.getAccessToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'multipart/form-data',
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await axios.post('/api/uploads', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers,
       });
 
       const blobReference: BlobReference = response.data;

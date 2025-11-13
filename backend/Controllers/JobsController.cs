@@ -85,8 +85,26 @@ public class JobsController : ControllerBase
             var jobId = GenerateJobId();
             _logger.LogInformation("🆔 [Jobs {RequestId}] Generated job ID: {JobId}", requestId, jobId);
 
+            // Extract access token from Authorization header
+            string? accessToken = null;
+            if (Request.Headers.TryGetValue("Authorization", out var authHeader))
+            {
+                var headerValue = authHeader.ToString();
+                if (headerValue.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    accessToken = headerValue.Substring("Bearer ".Length).Trim();
+                    _logger.LogInformation("🔑 [Jobs {RequestId}] Access token captured from Authorization header", requestId);
+                }
+            }
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                _logger.LogWarning("⚠️ [Jobs {RequestId}] No access token provided - job will not be able to call Copilot API", requestId);
+            }
+
             // Create job entity
             var jobEntity = JobEntity.FromCreateRequest(request, jobId);
+            jobEntity.AccessToken = accessToken; // Store the access token with the job
             
             // Set status to Queued as per acceptance criteria
             jobEntity.Status = JobStatus.Pending; // Note: Using Pending as it's equivalent to Queued in the enum

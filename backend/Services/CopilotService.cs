@@ -7,10 +7,49 @@ using System.Diagnostics;
 
 namespace CopilotEvalApi.Services;
 
+/// <summary>
+/// Service interface for interacting with Microsoft 365 Copilot Chat API
+/// </summary>
+/// <remarks>
+/// The Microsoft 365 Copilot Chat API provides access to:
+/// - Multi-turn conversations with enterprise search grounding
+/// - Optional web search grounding (enabled by default)
+/// - OneDrive/SharePoint file context support
+/// - OAuth2 authentication flow
+/// 
+/// Requirements:
+/// - Microsoft 365 Copilot license for each user
+/// - Microsoft 365 E3/E5 subscription (or equivalent)
+/// - Appropriate Microsoft Graph API permissions
+/// 
+/// Known Limitations:
+/// - Text-only responses (no action/content generation)
+/// - Cannot create files, send emails, or schedule meetings
+/// - No tools support (code interpreter, graphic art)
+/// - Long-running tasks prone to gateway timeouts
+/// - Web search grounding must be toggled off per message if not desired
+/// - Subject to Microsoft 365 Copilot semantic index limitations
+/// 
+/// Documentation: https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview
+/// </remarks>
 public interface ICopilotService
 {
+    /// <summary>
+    /// Creates a new conversation with Microsoft 365 Copilot
+    /// </summary>
+    /// <param name="accessToken">OAuth2 access token with appropriate Graph API scopes</param>
+    /// <returns>Conversation ID for subsequent chat messages</returns>
     Task<string> CreateConversationAsync(string accessToken);
+    
+    /// <summary>
+    /// Sends a chat message to an existing Copilot conversation
+    /// </summary>
+    /// <param name="accessToken">OAuth2 access token</param>
+    /// <param name="conversationId">ID from CreateConversationAsync</param>
+    /// <param name="request">Chat request with message, context, and options</param>
+    /// <returns>Copilot conversation response with messages and attributions</returns>
     Task<CopilotConversation> ChatAsync(string accessToken, string conversationId, CopilotChatRequest request);
+    
     Task<string> GetAuthUrlAsync(string redirectUri, string state);
     Task<TokenResponse> ExchangeCodeForTokenAsync(string code, string redirectUri);
     Task<TeamsAppsResponse> GetInstalledAgentsAsync(string accessToken);
@@ -219,7 +258,10 @@ public class CopilotService : ICopilotService
                 
                 _logger.LogError("💥 Failed to send chat message. Status: {StatusCode}, Content: {Content}", 
                     response.StatusCode, responseContent);
-                throw new HttpRequestException($"Failed to send chat: {response.StatusCode} - {responseContent}");
+                
+                // Provide user-friendly error messages for known API limitations
+                var errorMessage = ParseCopilotApiError(response.StatusCode, responseContent);
+                throw new HttpRequestException(errorMessage);
             }
 
             var chatResponse = JsonSerializer.Deserialize<CopilotConversation>(responseContent, new JsonSerializerOptions
@@ -428,5 +470,67 @@ public class CopilotService : ICopilotService
             _logger.LogError(ex, "💥 Error retrieving installed agents");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Parses Copilot API errors and returns user-friendly error messages based on known limitations
+    /// </summary>
+    private string ParseCopilotApiError(System.Net.HttpStatusCode statusCode, string responseContent)
+    {
+        // Check for licensing issues (403 Forbidden is common for license problems)
+        if (statusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            if (responseContent.Contains("license", StringComparison.OrdinalIgnoreCase) ||
+                responseContent.Contains("subscription", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Microsoft 365 Copilot Chat API requires a Microsoft 365 Copilot add-on license. " +
+                       "Please ensure your account has the appropriate license assigned. " +
+                       $"Status: {statusCode} - {responseContent}";
+            }
+            
+            return $"Access denied to Microsoft 365 Copilot Chat API. This may be due to missing permissions or licensing. " +
+                   $"Status: {statusCode} - {responseContent}";
+        }
+
+        // Check for gateway timeouts (504) - common for long-running tasks
+        if (statusCode == System.Net.HttpStatusCode.GatewayTimeout)
+        {
+            return "The Copilot Chat API request timed out. The Chat API doesn't support long-running tasks. " +
+                   "Please try a simpler or shorter prompt. " +
+                   $"Status: {statusCode} - {responseContent}";
+        }
+
+        // Check for bad request errors that might indicate unsupported operations
+        if (statusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            var lowerContent = responseContent.ToLowerInvariant();
+            
+            if (lowerContent.Contains("action") || lowerContent.Contains("create") || 
+                lowerContent.Contains("generate content"))
+            {
+                return "The Copilot Chat API doesn't support action or content generation (e.g., creating files, sending emails, scheduling meetings). " +
+                       "Please rephrase your prompt to request information or analysis instead. " +
+                       $"Status: {statusCode} - {responseContent}";
+            }
+            
+            if (lowerContent.Contains("tool") || lowerContent.Contains("code interpreter") || 
+                lowerContent.Contains("graphic"))
+            {
+                return "The Copilot Chat API doesn't support tools like code interpreter or graphic art generation. " +
+                       "Please request text-based responses only. " +
+                       $"Status: {statusCode} - {responseContent}";
+            }
+        }
+
+        // Check for unauthorized (401) - token issues
+        if (statusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            return "Authentication failed for Microsoft 365 Copilot Chat API. " +
+                   "Your access token may be expired or invalid. Please sign in again. " +
+                   $"Status: {statusCode} - {responseContent}";
+        }
+
+        // Default error message
+        return $"Microsoft 365 Copilot Chat API request failed: {statusCode} - {responseContent}";
     }
 }

@@ -61,15 +61,22 @@ public class ExecutionService : IExecutionService
 
         try
         {
+            // Retrieve the job entity to get the access token
+            var jobEntity = await _jobRepository.GetJobByIdAsync(job.Id);
+            if (jobEntity == null)
+            {
+                throw new InvalidOperationException($"Job {job.Id} not found in repository");
+            }
+
             // Update job status to Running
             await UpdateJobStatusAsync(job.Id, JobStatus.Running, 
                 new JobProgress(TotalItems: 100, CompletedItems: 0, Percentage: 0.0));
 
             var result = job.Type switch
             {
-                JobType.BulkEvaluation => await ExecuteBulkEvaluationAsync(job, requestId, cancellationToken),
-                JobType.SingleEvaluation => await ExecuteSingleEvaluationAsync(job, requestId, cancellationToken),
-                JobType.BatchProcessing => await ExecuteBatchProcessingAsync(job, requestId, cancellationToken),
+                JobType.BulkEvaluation => await ExecuteBulkEvaluationAsync(job, jobEntity.AccessToken, requestId, cancellationToken),
+                JobType.SingleEvaluation => await ExecuteSingleEvaluationAsync(job, jobEntity.AccessToken, requestId, cancellationToken),
+                JobType.BatchProcessing => await ExecuteBatchProcessingAsync(job, jobEntity.AccessToken, requestId, cancellationToken),
                 _ => throw new NotSupportedException($"Job type {job.Type} is not supported")
             };
 
@@ -108,7 +115,7 @@ public class ExecutionService : IExecutionService
         }
     }
 
-    private async Task<JobExecutionResult> ExecuteBulkEvaluationAsync(Job job, string requestId, CancellationToken cancellationToken)
+    private async Task<JobExecutionResult> ExecuteBulkEvaluationAsync(Job job, string? accessToken, string requestId, CancellationToken cancellationToken)
     {
         _logger.LogInformation("📊 [Execution {RequestId}] Executing bulk evaluation job", requestId);
 
@@ -141,7 +148,7 @@ public class ExecutionService : IExecutionService
             await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
 
             // Generate evaluation result for this specific prompt
-            var evaluationResult = await ProcessSinglePromptAsync(csvRow, itemId, job.Configuration, requestId, cancellationToken);
+            var evaluationResult = await ProcessSinglePromptAsync(csvRow, itemId, job.Configuration, accessToken, requestId, cancellationToken);
             results.Add(evaluationResult);
 
             // Update progress every 5 items or at completion
@@ -182,7 +189,7 @@ public class ExecutionService : IExecutionService
         };
     }
 
-    private async Task<JobExecutionResult> ExecuteSingleEvaluationAsync(Job job, string requestId, CancellationToken cancellationToken)
+    private async Task<JobExecutionResult> ExecuteSingleEvaluationAsync(Job job, string? accessToken, string requestId, CancellationToken cancellationToken)
     {
         _logger.LogInformation("🎯 [Execution {RequestId}] Executing single evaluation job", requestId);
 
@@ -234,7 +241,7 @@ public class ExecutionService : IExecutionService
         };
     }
 
-    private async Task<JobExecutionResult> ExecuteBatchProcessingAsync(Job job, string requestId, CancellationToken cancellationToken)
+    private async Task<JobExecutionResult> ExecuteBatchProcessingAsync(Job job, string? accessToken, string requestId, CancellationToken cancellationToken)
     {
         _logger.LogInformation("🔄 [Execution {RequestId}] Executing batch processing job", requestId);
 
@@ -354,13 +361,13 @@ public class ExecutionService : IExecutionService
                 return GetSampleCsvData();
             }
 
-            // Parse header row
-            var headers = lines[0].Split(',').Select(h => h.Trim('"').Trim()).ToArray();
+            // Parse header row with proper CSV parsing
+            var headers = ParseCsvLine(lines[0]);
             
-            // Parse data rows
+            // Parse data rows with proper CSV parsing
             for (int i = 1; i < lines.Count; i++)
             {
-                var values = lines[i].Split(',').Select(v => v.Trim('"').Trim()).ToArray();
+                var values = ParseCsvLine(lines[i]);
                 var dict = new Dictionary<string, string>();
                 
                 for (int j = 0; j < Math.Min(headers.Length, values.Length); j++)
@@ -380,6 +387,47 @@ public class ExecutionService : IExecutionService
         }
 
         return csvData;
+    }
+
+    private string[] ParseCsvLine(string line)
+    {
+        var result = new List<string>();
+        var currentField = new StringBuilder();
+        bool inQuotes = false;
+        
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            
+            if (c == '"')
+            {
+                // Handle escaped quotes ("")
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    currentField.Append('"');
+                    i++; // Skip the next quote
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                // End of field
+                result.Add(currentField.ToString().Trim());
+                currentField.Clear();
+            }
+            else
+            {
+                currentField.Append(c);
+            }
+        }
+        
+        // Add the last field
+        result.Add(currentField.ToString().Trim());
+        
+        return result.ToArray();
     }
 
     private List<Dictionary<string, string>> GetSampleCsvData()
@@ -406,11 +454,11 @@ public class ExecutionService : IExecutionService
         };
     }
 
-    private async Task<EvaluationResult> ProcessSinglePromptAsync(Dictionary<string, string> csvRow, string itemId, JobConfiguration config, string requestId, CancellationToken cancellationToken)
+    private async Task<EvaluationResult> ProcessSinglePromptAsync(Dictionary<string, string> csvRow, string itemId, JobConfiguration config, string? accessToken, string requestId, CancellationToken cancellationToken)
     {
         // Handle different CSV column name formats (case-insensitive and flexible naming)
-        var prompt = GetCsvValue(csvRow, "prompt", "Prompt", "PROMPT");
-        var expectedResponse = GetCsvValue(csvRow, "expected_response", "expected_output", "Expected Output", "EXPECTED_OUTPUT", "expected", "Expected");
+        var prompt = GetCsvValue(csvRow, "prompt", "Prompt", "PROMPT", "Question");
+        var expectedResponse = GetCsvValue(csvRow, "expected_response", "expected_output", "Expected Output", "EXPECTED_OUTPUT", "expected", "Expected", "Answer");
 
         _logger.LogInformation("🔍 [Execution {RequestId}] Processing prompt: {Prompt}", requestId, prompt.Length > 50 ? prompt[..50] + "..." : prompt);
 
@@ -419,17 +467,18 @@ public class ExecutionService : IExecutionService
             // Simulate AI response generation
             await Task.Delay(100, cancellationToken); // Simulate processing time
 
-            var actualResponse = await GenerateAIResponseAsync(prompt, config, requestId, cancellationToken);
-            var similarityScore = await CalculateSimilarityScoreAsync(expectedResponse, actualResponse, requestId, cancellationToken);
-            var passed = similarityScore >= (config.EvaluationCriteria?.SimilarityThreshold ?? 0.8);
+            var actualResponse = await GenerateAIResponseAsync(prompt, config, accessToken, requestId, cancellationToken);
+            var evaluationResult = await CalculateSimilarityScoreAsync(expectedResponse, actualResponse, accessToken, requestId, cancellationToken);
+            var passed = evaluationResult.Score >= (config.EvaluationCriteria?.SimilarityThreshold ?? 0.8);
 
-            // Generate evaluation details with reasoning
+            // Generate evaluation details with reasoning from Copilot semantic evaluation
             var passThreshold = config.EvaluationCriteria?.SimilarityThreshold ?? 0.8;
-            var reasoning = similarityScore >= passThreshold 
-                ? $"Response passed with {similarityScore:P1} similarity (threshold: {passThreshold:P1})"
-                : $"Response failed with {similarityScore:P1} similarity (threshold: {passThreshold:P1})";
+            var statusReasoning = evaluationResult.Score >= passThreshold 
+                ? $"Response passed with {evaluationResult.Score:P1} similarity (threshold: {passThreshold:P1})"
+                : $"Response failed with {evaluationResult.Score:P1} similarity (threshold: {passThreshold:P1})";
 
-            var differences = GenerateDifferencesAnalysis(expectedResponse, actualResponse, similarityScore);
+            // Combine status reasoning with Copilot's semantic evaluation reasoning
+            var fullReasoning = $"{statusReasoning}. {evaluationResult.Reasoning}";
 
             return new EvaluationResult
             {
@@ -437,12 +486,12 @@ public class ExecutionService : IExecutionService
                 Prompt = prompt,
                 ExpectedResponse = expectedResponse,
                 ActualResponse = actualResponse,
-                SimilarityScore = similarityScore,
+                SimilarityScore = evaluationResult.Score,
                 Passed = passed,
                 EvaluationDetails = new EvaluationDetails
                 {
-                    Reasoning = reasoning,
-                    Differences = differences
+                    Reasoning = fullReasoning,
+                    Differences = evaluationResult.Differences
                 }
             };
         }
@@ -478,103 +527,313 @@ public class ExecutionService : IExecutionService
         return "";
     }
 
-    private async Task<string> GenerateAIResponseAsync(string prompt, JobConfiguration config, string requestId, CancellationToken cancellationToken)
+    private async Task<string> GenerateAIResponseAsync(string prompt, JobConfiguration config, string? accessToken, string requestId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("🤖 [Execution {RequestId}] Generating AI response for prompt", requestId);
+        _logger.LogInformation("🤖 [Execution {RequestId}] Generating AI response for prompt: {PromptPreview}", 
+            requestId, prompt.Length > 100 ? prompt[..100] + "..." : prompt);
         
         try
         {
-            // Try to get services from DI container
+            // Try to get Copilot service and GraphSearchService from DI container
             using var scope = _serviceProvider.CreateScope();
             var copilotService = scope.ServiceProvider.GetService<ICopilotService>();
+            var graphSearchService = scope.ServiceProvider.GetService<GraphSearchService>();
             
-            if (copilotService != null && !string.IsNullOrEmpty(config.AgentConfiguration?.KnowledgeSource))
+            if (copilotService == null)
             {
-                _logger.LogInformation("🧠 [Execution {RequestId}] Using Copilot service for AI response", requestId);
+                _logger.LogError("❌ [Execution {RequestId}] Copilot service not available", requestId);
+                return "Error: Copilot service not configured.";
+            }
+
+            // Check if access token is available
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                _logger.LogError("❌ [Execution {RequestId}] No access token available. User must be authenticated to use Copilot API.", requestId);
+                return "Error: No access token available for Copilot API. Please authenticate first.";
+            }
+
+            _logger.LogInformation("🧠 [Execution {RequestId}] Using Copilot Chat API for AI response", requestId);
+            
+            // Create a new conversation for this prompt
+            string conversationId;
+            try
+            {
+                conversationId = await copilotService.CreateConversationAsync(accessToken);
+                _logger.LogInformation("✅ [Execution {RequestId}] Created conversation: {ConversationId}", requestId, conversationId);
+            }
+            catch (Exception convEx)
+            {
+                _logger.LogError(convEx, "❌ [Execution {RequestId}] Failed to create conversation", requestId);
+                return $"Error: Failed to create Copilot conversation: {convEx.Message}";
+            }
+            
+            // Prepare the message text, incorporating instructions and knowledge source directly into the prompt
+            // This matches the behavior of the single prompt endpoint for consistent results
+            var messageText = prompt;
+            
+            // If additional instructions are provided, prepend them to the main prompt
+            if (!string.IsNullOrWhiteSpace(config.AgentConfiguration?.AdditionalInstructions))
+            {
+                messageText = $"{config.AgentConfiguration.AdditionalInstructions}\n\n{messageText}";
+                _logger.LogInformation("📋 [Execution {RequestId}] Embedded instructions in prompt. Total length: {Length} chars", 
+                    requestId, messageText.Length);
+            }
+            
+            // Search knowledge source if specified and embed results in prompt
+            if (!string.IsNullOrWhiteSpace(config.AgentConfiguration?.KnowledgeSource) && graphSearchService != null)
+            {
+                _logger.LogInformation("🔍 [Execution {RequestId}] Searching knowledge source: {ConnectionId}", 
+                    requestId, config.AgentConfiguration.KnowledgeSource);
                 
-                // Use real Copilot API - we need an access token for this
-                // For now, we'll simulate a more realistic response based on the prompt
-                await Task.Delay(500, cancellationToken); // Simulate realistic API call time
+                try
+                {
+                    var searchResults = await graphSearchService.SearchKnowledgeSourceAsync(
+                        accessToken, 
+                        config.AgentConfiguration.KnowledgeSource, 
+                        prompt, // Use original prompt for search
+                        5 // Max results
+                    );
+                    
+                    if (searchResults.Any())
+                    {
+                        _logger.LogInformation("📊 [Execution {RequestId}] Found {ResultCount} results from knowledge source", 
+                            requestId, searchResults.Count);
+                        
+                        var knowledgeContext = graphSearchService.FormatSearchResultsAsContext(
+                            searchResults, 
+                            config.AgentConfiguration.KnowledgeSource);
+                        
+                        // Embed knowledge source results directly in the prompt
+                        messageText = $"Based on the following information from {config.AgentConfiguration.KnowledgeSource}:\n\n{knowledgeContext}\n\n{messageText}";
+                        
+                        _logger.LogInformation("📚 [Execution {RequestId}] Embedded knowledge source results in prompt. Total length: {Length} chars", 
+                            requestId, messageText.Length);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ [Execution {RequestId}] No results found in knowledge source: {ConnectionId}", 
+                            requestId, config.AgentConfiguration.KnowledgeSource);
+                        
+                        // Inform that no knowledge was found
+                        messageText = $"Note: No information was found in {config.AgentConfiguration.KnowledgeSource} knowledge source.\n\n{messageText}";
+                    }
+                }
+                catch (Exception searchEx)
+                {
+                    _logger.LogError(searchEx, "❌ [Execution {RequestId}] Failed to search knowledge source", requestId);
+                    // Continue without knowledge source results
+                }
+            }
+            
+            // Prepare the chat request with proper model structure
+            // Note: Web search grounding is enabled by default unless explicitly disabled
+            // DisableWebSearchGrounding can be set to true if you only want enterprise search
+            var chatRequest = new CopilotChatRequest(
+                Message: new CopilotConversationRequestMessage(Text: messageText),
+                AdditionalContext: null, // All context now embedded in main message for consistency with single prompt endpoint
+                LocationHint: new CopilotConversationLocation(
+                    Latitude: null,
+                    Longitude: null,
+                    TimeZone: "America/New_York", // IANA timezone format required (consistent with single prompt endpoint)
+                    CountryOrRegion: "US",
+                    CountryOrRegionConfidence: null
+                ),
+                DisableWebSearchGrounding: null, // null = use default (enabled)
+                FileReferences: null // Future: Support OneDrive/SharePoint file context
+            );
+            
+            // Call Copilot Chat API
+            _logger.LogInformation("📡 [Execution {RequestId}] Sending chat request to Copilot API with prompt length: {Length} chars", 
+                requestId, messageText.Length);
+            var response = await copilotService.ChatAsync(accessToken, conversationId, chatRequest);
+            
+            if (response?.Messages != null && response.Messages.Count > 0)
+            {
+                // Get the last message which should be Copilot's response
+                var lastMessage = response.Messages[^1];
+                var aiResponse = lastMessage.Text;
                 
-                // Generate more contextual responses based on prompt content
-                if (prompt.ToLowerInvariant().Contains("financial") || prompt.ToLowerInvariant().Contains("revenue"))
-                {
-                    return "Based on the financial data provided, the revenue trends show strong growth in Q4 with year-over-year increases of approximately 15%. The financial metrics indicate stable performance across key indicators.";
-                }
-                else if (prompt.ToLowerInvariant().Contains("technology") || prompt.ToLowerInvariant().Contains("ai"))
-                {
-                    return "The technology landscape continues to evolve rapidly, with artificial intelligence playing an increasingly important role in business operations and strategic decision-making.";
-                }
-                else if (prompt.ToLowerInvariant().Contains("market") || prompt.ToLowerInvariant().Contains("analysis"))
-                {
-                    return "Market analysis indicates positive trends with sustained growth potential. Key market indicators suggest favorable conditions for continued expansion and strategic investments.";
-                }
-                else
-                {
-                    // Generate a response that relates to the prompt structure
-                    return $"Based on the provided context and requirements, the analysis indicates relevant findings that address the key aspects outlined in the query. The evaluation considers multiple factors to provide comprehensive insights.";
-                }
+                _logger.LogInformation("✅ [Execution {RequestId}] Received Copilot response ({Length} chars)", 
+                    requestId, aiResponse?.Length ?? 0);
+                
+                return aiResponse ?? "No response text received from Copilot.";
             }
             else
             {
-                _logger.LogWarning("⚠️ [Execution {RequestId}] Copilot service not available, using simulated responses", requestId);
-                
-                // Enhanced simulation with more varied responses
-                var responses = new[]
-                {
-                    "Analysis shows strong performance indicators with positive trends across key metrics.",
-                    "The evaluation demonstrates consistent results aligned with expected outcomes and industry benchmarks.",
-                    "Based on the available data, the findings indicate favorable conditions with sustainable growth potential.",
-                    "The assessment reveals important insights that support strategic decision-making and operational planning.",
-                    "Comprehensive review indicates alignment with established criteria and performance standards."
-                };
-
-                await Task.Delay(200, cancellationToken); // Simulate API call time
-                return responses[Math.Abs(prompt.GetHashCode()) % responses.Length];
+                _logger.LogWarning("⚠️ [Execution {RequestId}] Copilot returned empty response", requestId);
+                return "No response received from Copilot API.";
             }
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogError(httpEx, "❌ [Execution {RequestId}] HTTP error calling Copilot API", requestId);
+            return $"Error: Copilot API request failed: {httpEx.Message}";
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ [Execution {RequestId}] Error generating AI response", requestId);
-            return "Error: Unable to generate AI response due to service unavailability.";
+            return $"Error: Unable to generate AI response: {ex.Message}";
         }
     }
 
-    private async Task<double> CalculateSimilarityScoreAsync(string expected, string actual, string requestId, CancellationToken cancellationToken)
+    private List<CopilotContextMessage>? BuildAdditionalContext(JobConfiguration config)
     {
-        _logger.LogInformation("📊 [Execution {RequestId}] Calculating similarity score using enhanced evaluation", requestId);
+        var contextMessages = new List<CopilotContextMessage>();
+        
+        if (!string.IsNullOrEmpty(config.AgentConfiguration?.AdditionalInstructions))
+        {
+            contextMessages.Add(new CopilotContextMessage(
+                Text: config.AgentConfiguration.AdditionalInstructions,
+                Description: "Additional instructions"
+            ));
+        }
+        
+        if (!string.IsNullOrEmpty(config.AgentConfiguration?.KnowledgeSource))
+        {
+            contextMessages.Add(new CopilotContextMessage(
+                Text: $"Use knowledge from: {config.AgentConfiguration.KnowledgeSource}",
+                Description: "Knowledge source reference"
+            ));
+        }
+        
+        return contextMessages.Count > 0 ? contextMessages : null;
+    }
+
+    private async Task<SemanticEvaluationResult> CalculateSimilarityScoreAsync(string expected, string actual, string? accessToken, string requestId, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("📊 [Execution {RequestId}] Calculating similarity score using Copilot semantic evaluation", requestId);
         
         if (string.IsNullOrEmpty(expected) && string.IsNullOrEmpty(actual))
-            return 1.0;
+            return new SemanticEvaluationResult 
+            { 
+                Score = 1.0, 
+                Reasoning = "Both responses are empty",
+                Differences = "None"
+            };
         
         if (string.IsNullOrEmpty(expected) || string.IsNullOrEmpty(actual))
-            return 0.0;
+            return new SemanticEvaluationResult 
+            { 
+                Score = 0.0, 
+                Reasoning = string.IsNullOrEmpty(expected) ? "Expected response is empty" : "Actual response is empty",
+                Differences = "One response is missing"
+            };
 
         try
         {
-            // Try to use the real Copilot similarity evaluation from the API
+            // Use Copilot for semantic similarity evaluation (same as single prompt endpoint)
             using var scope = _serviceProvider.CreateScope();
             var copilotService = scope.ServiceProvider.GetService<ICopilotService>();
             
-            if (copilotService != null)
+            if (copilotService == null)
             {
-                _logger.LogInformation("🧠 [Execution {RequestId}] Using Copilot semantic similarity evaluation", requestId);
+                _logger.LogWarning("⚠️ [Execution {RequestId}] Copilot service not available, using fallback algorithm", requestId);
+                var fallbackScore = await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+                return new SemanticEvaluationResult 
+                { 
+                    Score = fallbackScore,
+                    Reasoning = "Copilot service unavailable - used Levenshtein distance algorithm",
+                    Differences = GenerateDifferencesAnalysis(expected, actual, fallbackScore)
+                };
+            }
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                _logger.LogWarning("⚠️ [Execution {RequestId}] No access token available for Copilot evaluation, using fallback", requestId);
+                var fallbackScore = await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+                return new SemanticEvaluationResult 
+                { 
+                    Score = fallbackScore,
+                    Reasoning = "No access token available - used Levenshtein distance algorithm",
+                    Differences = GenerateDifferencesAnalysis(expected, actual, fallbackScore)
+                };
+            }
+            
+            _logger.LogInformation("🧠 [Execution {RequestId}] Using Copilot API for semantic similarity evaluation", requestId);
+            
+            // Create conversation for evaluation
+            var conversationId = await copilotService.CreateConversationAsync(accessToken);
+            
+            // Construct evaluation prompt (same as single prompt endpoint)
+            var evaluationPrompt = $@"You are an expert evaluator. Please compare these two responses and determine if they provide semantically equivalent answers.
+
+Expected Response: ""{expected}""
+Actual Response: ""{actual}""
+
+Please analyze the semantic similarity and respond with EXACTLY this format (no additional text before or after):
+
+Score: [number between 0.0 and 1.0]
+Reasoning: [brief explanation of your evaluation]
+Differences: [key differences, or 'None' if semantically equivalent]
+
+Scoring guide:
+- 1.0 = Semantically identical (same meaning, even if different wording)
+- 0.8-0.9 = Very similar meaning with minor differences
+- 0.5-0.7 = Partially similar but notable differences in meaning
+- 0.2-0.4 = Different meanings but some related concepts
+- 0.0-0.1 = Completely different meanings
+
+Focus on semantic meaning rather than exact word matching. Start your response with 'Score:'";
+
+            var chatRequest = new CopilotChatRequest(
+                Message: new CopilotConversationRequestMessage(evaluationPrompt),
+                AdditionalContext: null,
+                LocationHint: new CopilotConversationLocation(
+                    Latitude: null,
+                    Longitude: null,
+                    TimeZone: "America/New_York",
+                    CountryOrRegion: null,
+                    CountryOrRegionConfidence: null
+                )
+            );
+
+            var response = await copilotService.ChatAsync(accessToken, conversationId, chatRequest);
+            var responseText = response.Messages.LastOrDefault()?.Text ?? "";
+            
+            // Parse the score, reasoning, and differences from Copilot's response
+            var scoreMatch = System.Text.RegularExpressions.Regex.Match(responseText, @"Score:\s*([\d.]+)", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var reasoningMatch = System.Text.RegularExpressions.Regex.Match(responseText, @"Reasoning:\s*(.+?)(?=\n(?:Differences:|$))", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            var differencesMatch = System.Text.RegularExpressions.Regex.Match(responseText, @"Differences:\s*(.+?)$", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            
+            if (scoreMatch.Success && double.TryParse(scoreMatch.Groups[1].Value, out var score))
+            {
+                var reasoning = reasoningMatch.Success ? reasoningMatch.Groups[1].Value.Trim() : "Semantic evaluation completed";
+                var differences = differencesMatch.Success ? differencesMatch.Groups[1].Value.Trim() : "See reasoning for details";
                 
-                // Note: We would need an access token for this to work
-                // For now, we'll use an enhanced similarity algorithm that considers semantic meaning
-                return await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+                _logger.LogInformation("✅ [Execution {RequestId}] Copilot evaluated similarity: {Score:F3}", requestId, score);
+                
+                return new SemanticEvaluationResult 
+                { 
+                    Score = Math.Clamp(score, 0.0, 1.0),
+                    Reasoning = reasoning,
+                    Differences = differences
+                };
             }
             else
             {
-                _logger.LogWarning("⚠️ [Execution {RequestId}] Copilot service not available, using enhanced similarity algorithm", requestId);
-                return await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+                _logger.LogWarning("⚠️ [Execution {RequestId}] Could not parse Copilot score response, using fallback", requestId);
+                var fallbackScore = await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+                return new SemanticEvaluationResult 
+                { 
+                    Score = fallbackScore,
+                    Reasoning = "Failed to parse Copilot response - used fallback algorithm",
+                    Differences = GenerateDifferencesAnalysis(expected, actual, fallbackScore)
+                };
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [Execution {RequestId}] Error calculating similarity score", requestId);
-            // Fallback to basic similarity
-            return CalculateBasicSimilarityScore(expected, actual);
+            _logger.LogError(ex, "❌ [Execution {RequestId}] Error calculating similarity with Copilot, using fallback", requestId);
+            var fallbackScore = await CalculateEnhancedSimilarityAsync(expected, actual, requestId, cancellationToken);
+            return new SemanticEvaluationResult 
+            { 
+                Score = fallbackScore,
+                Reasoning = $"Error during Copilot evaluation: {ex.Message}",
+                Differences = GenerateDifferencesAnalysis(expected, actual, fallbackScore)
+            };
         }
     }
 
@@ -796,6 +1055,16 @@ public class ExecutionService : IExecutionService
         
         return "Responses are substantially different in content and structure";
     }
+}
+
+/// <summary>
+/// Contains detailed semantic evaluation results from Copilot
+/// </summary>
+internal class SemanticEvaluationResult
+{
+    public double Score { get; set; }
+    public string Reasoning { get; set; } = string.Empty;
+    public string Differences { get; set; } = string.Empty;
 }
 
 /// <summary>

@@ -211,6 +211,7 @@ class AuthService {
       const response = await axios.post<CopilotChatResponse>(`${API_BASE_URL}/copilot/chat`, chatRequest, {
         headers: {
           ...correlationHeaders,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -279,6 +280,7 @@ class AuthService {
     const response = await axios.post<SimilarityResponse>(`${API_BASE_URL}/similarity/score`, fullRequest, {
       headers: {
         ...correlationHeaders,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -306,7 +308,10 @@ class AuthService {
 
     try {
       const response = await axios.get<TeamsAppsResponse>(`${API_BASE_URL}/copilot/agents`, {
-        params: { accessToken }
+        params: { accessToken },
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
       });
       
       console.log('📱 Agents response:', {
@@ -342,7 +347,10 @@ class AuthService {
 
     try {
       const response = await axios.get<ExternalConnectionsResponse>(`${API_BASE_URL}/copilot/knowledge-sources`, {
-        params: { accessToken }
+        params: { accessToken },
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
       });
       
       console.log('🗃️ Knowledge sources response:', {

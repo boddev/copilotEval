@@ -16,10 +16,30 @@ public record CopilotConversationCreateResponse(
     List<CopilotConversationResponseMessage> Messages
 );
 
+/// <summary>
+/// Request model for Microsoft 365 Copilot Chat API
+/// </summary>
+/// <remarks>
+/// The Chat API supports:
+/// - Enterprise search grounding (always enabled)
+/// - Web search grounding (enabled by default, can be disabled per message)
+/// - OneDrive/SharePoint file context
+/// 
+/// Known Limitations:
+/// - No action/content generation (can't create files, emails, meetings)
+/// - Text-only responses
+/// - No tools (code interpreter, graphic art)
+/// - Long-running tasks prone to gateway timeouts
+/// - Requires Microsoft 365 Copilot license
+/// 
+/// See: https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview
+/// </remarks>
 public record CopilotChatRequest(
     [property: JsonPropertyName("message")] CopilotConversationRequestMessage Message,
     [property: JsonPropertyName("additionalContext")] List<CopilotContextMessage>? AdditionalContext,
-    [property: JsonPropertyName("locationHint")] CopilotConversationLocation LocationHint
+    [property: JsonPropertyName("locationHint")] CopilotConversationLocation LocationHint,
+    [property: JsonPropertyName("disableWebSearchGrounding")] bool? DisableWebSearchGrounding = null,
+    [property: JsonPropertyName("fileReferences")] List<CopilotFileReference>? FileReferences = null
 );
 
 public record CopilotConversationRequestMessage(
@@ -29,6 +49,14 @@ public record CopilotConversationRequestMessage(
 public record CopilotContextMessage(
     [property: JsonPropertyName("text")] string Text,
     [property: JsonPropertyName("description")] string? Description
+);
+
+/// <summary>
+/// Represents a file reference for OneDrive or SharePoint files to provide as context
+/// </summary>
+public record CopilotFileReference(
+    [property: JsonPropertyName("fileUrl")] string FileUrl,
+    [property: JsonPropertyName("fileName")] string? FileName = null
 );
 
 public record CopilotConversationLocation(

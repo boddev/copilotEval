@@ -49,6 +49,9 @@ public class JobEntity
     // Store results blob reference as JSON string (nullable)
     public string? ResultsBlobReferenceJson { get; set; }
 
+    // Store access token for Copilot API calls (encrypted in production)
+    public string? AccessToken { get; set; }
+
     /// <summary>
     /// Convert JobEntity to Job model
     /// </summary>

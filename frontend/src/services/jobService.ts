@@ -6,6 +6,7 @@ import {
   JobListResponse, 
   JobListFilters 
 } from '../types/Job';
+import { authService } from './authService';
 
 const API_BASE_URL = '/api';
 
@@ -14,6 +15,17 @@ const jobApiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Add request interceptor to include access token in Authorization header
+jobApiClient.interceptors.request.use((config) => {
+  const token = authService.getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
 });
 
 export interface ErrorResponse {

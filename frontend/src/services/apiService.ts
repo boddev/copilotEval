@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { authService } from './authService';
 
 const API_BASE_URL = '/api';
 
@@ -7,6 +8,17 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Add request interceptor to include access token in Authorization header
+apiClient.interceptors.request.use((config) => {
+  const token = authService.getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
 });
 
 export interface ChatRequest {
