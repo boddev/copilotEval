@@ -135,3 +135,5 @@ infra/parameters/dev.parameters.json
 backend/appsettings.Development.json
 test-files/ibiscopy.csv
 test-files/ibis.csv
+.github/secrets-quick-reference.txt
+.github/SECRETS_SETUP.md

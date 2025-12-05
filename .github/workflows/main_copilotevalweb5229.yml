@@ -55,6 +55,23 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_54393D3157374C70A92775FC58ECBFD0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_447326F3E6D646728089EA307F956CB0 }}
 
+      - name: Configure Azure Web App Settings
+        run: |
+          az webapp config appsettings set --name copilotevalweb5229 --resource-group copilot-dev-001 --settings `
+            "AzureAd__TenantId=${{ secrets.AZURE_AD_TENANT_ID }}" `
+            "AzureAd__ClientId=${{ secrets.AZURE_AD_CLIENT_ID }}" `
+            "AzureAd__ClientSecret=${{ secrets.AZURE_AD_CLIENT_SECRET }}" `
+            "AzureAd__Instance=https://login.microsoftonline.com/" `
+            "AzureAd__Authority=https://login.microsoftonline.com/${{ secrets.AZURE_AD_TENANT_ID }}" `
+            "MicrosoftGraph__BaseUrl=https://graph.microsoft.com/beta" `
+            "Cors__AllowedOrigins__0=https://copilotevalst9571.z14.web.core.windows.net"
+
+      - name: Configure Connection Strings
+        run: |
+          az webapp config connection-string set --name copilotevalweb5229 --resource-group copilot-dev-001 `
+            --connection-string-type Custom `
+            --settings BlobStorage="${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}"
+
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
